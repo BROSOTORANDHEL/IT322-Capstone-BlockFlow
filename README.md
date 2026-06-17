@@ -35,12 +35,12 @@
 
 **Julongbayan, Mary Rose**
 
-Manuscript
-   1.Align Context Diagram with Use Case Diagram
-   2.Revise Chapter 2
-   3.Revise Chapter 3
-   4.Verify all references and sources
-   5.Update Use Case Descriptions
+1. Manuscript
+     - Align Context Diagram with Use Case Diagram
+     - Revise Chapter 2
+     - Revise Chapter 3
+     - Verify all references and sources
+     - Update Use Case Descriptions
 
 
 
