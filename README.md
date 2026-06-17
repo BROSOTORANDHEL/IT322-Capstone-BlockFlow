@@ -35,11 +35,12 @@
 
 **Julongbayan, Mary Rose**
 
-1.Manuscript
-    -Align Context Diagram with Use Case Diagram
-    -Revise Chapter 2
-    -Revise Chapter 3
+1. Manuscript
+     - Align Context Diagram with Use Case Diagram
+     - Revise Chapter 2
+     - Revise Chapter 3
+     - Verify all references and sources
+     - Update Use Case Descriptions
 
-2.UI Design
-    -Research modern inventory management UI designs
+
 
