@@ -1,3 +1,4 @@
+Brosoto, Randhel
 1. Manuscript
    -apply the recommendation of the panel
    -polish the manuscript
@@ -17,3 +18,12 @@
    -Test all of the calculation of the application
    -Test if the all of the inputed data are on the database
    -Test the AI features
+
+
+Codizal, cresmarie
+
+
+
+
+
+Julongbayan, Mary Rose
