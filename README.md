@@ -23,7 +23,7 @@
 **Codizal, Cresmarie**
 1. Manuscript for Capstone
    - Arrange the Objectives of the Study
-   - Re-arrange the Reearch Design
+   - Re-arrange the Research Design
    - Add the Functional Requirements
    - Put the owner in the Use Case Diagram
    - Also in the Context Diagram need to fix to aliign in the use Case
