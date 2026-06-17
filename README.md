@@ -1,4 +1,4 @@
-Brosoto, Randhel
+**Brosoto, Randhel**
 1. Manuscript
    -apply the recommendation of the panel
    -polish the manuscript
@@ -20,10 +20,17 @@ Brosoto, Randhel
    -Test the AI features
 
 
-Codizal, cresmarie
+**Codizal, Cresmarie**
+1. Manuscript for Capstone
+   - Arrange the Objectives of the Study
+   - Re-arrange the Reearch Design
+   - Add the Functional Requirements
+   - Put the owner in the Use Case Diagram
+   - Also in the Context Diagram need to fix to aliign in the use Case
+   - In the Data FLow Diagram need to put the owner
+
+2. Design color
+   - Search what is best color to fit the theme of the business and also add some contrast. 
 
 
-
-
-
-Julongbayan, Mary Rose
+**Julongbayan, Mary Rose**
