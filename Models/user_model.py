@@ -1,4 +1,5 @@
 from database import get_db_connection
+from pydantic import BaseModel
 
 class UserModel:
     @staticmethod
@@ -17,3 +18,10 @@ class UserModel:
             return None
         finally:
             connection.close()
+    
+
+class ExpenseSchema(BaseModel):
+    category: str
+    description: str
+    amount: float
+    date_recorded: str
