@@ -33,6 +33,7 @@ The main objective of the study is to design and develop BlockFlow, a management
 
 **June 29, 2026**
 Apply the some suggestions of the pannels in the paper.
+
 Inventory Management Features
  Product and raw material inventory tracking
  Stock-in and stock-out monitoring
