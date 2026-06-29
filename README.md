@@ -24,6 +24,9 @@
       Context Diagram
          Figure 5 illustrates the Staff primarily handles daily operational data, sending Update Inventory and Sales and Expenses Input into the system. In return, the system provides them with Dashboard Visualization for       real-time monitoring. Conversely, the Owner possesses higher-level analytical privileges. The Owner can submit a Report and Forecast Request, triggering the system to generate specialized strategic outputs. These          exclusive outputs delivered to the Owner include Dashboard Visualization, Generated Insights, and a comprehensive Autoregressive Prediction Report to support long-term business forecasting and decision-making.
 
+
+   *June 29*
+      appyling the suggestion of the panelist to out paper
 **Codizal, Cresmarie**
 1. Manuscript for Capstone
    - Arrange the Objectives of the Study
