@@ -61,6 +61,42 @@ The main objective of the study is to design and develop BlockFlow, a management
    Additionally, the use case diagram shows how BlockFlow integrates inventory, production, and sales management processes into one system to help Magalin Hollow Blocks Trading improve efficiency, accuracy, and overall business operations.
 
 
+**June 29, 2026**
+Apply the some suggestions of the pannels in the paper.
+
+Inventory Management Features
+ Product and raw material inventory tracking
+ Stock-in and stock-out monitoring
+ Low-stock and reorder alerts
+ Barcode or QR code integration
+ Supplier management
+ Batch and expiration tracking
+ Warehouse/storage monitoring
+ Inventory adjustment and audit logs
+Production Management Features
+ Production scheduling
+ Production order management
+ Bill of Materials (BOM) management
+ Raw material allocation
+ Work-in-progress tracking
+ Production status monitoring
+ Finished goods monitoring
+ Production cost computation
+ Machine and equipment monitoring
+Sales Management Features
+ Point-of-Sale (POS) integration
+ Sales order processing
+ Customer order management
+ Invoice and receipt generation
+ Sales tracking and monitoring
+ Discount and promo management
+ Customer management
+ Sales return handling
+Reporting and Analytics
+ Inventory reports
+ Sales reports
+ Production efficiency reports
+ Revenue and profit analysis
 
 
 
