@@ -67,33 +67,3 @@ Reporting and Analytics
  Sales reports
  Production efficiency reports
  Revenue and profit analysis
-
- Best-selling products analysis
- Forecasting and trend analysis
- Dashboard with charts and KPIs
-AI or Advanced Features
- AI-based sales forecasting
- Demand prediction for inventory planning
- Intelligent reorder recommendations
- Production optimization suggestions
- Customer buying behavior analysis
-Financial Features
- Cost and expense tracking
- Profit and loss monitoring
- Payment and transaction records
- Financial summary reports
-User and Security Features
- User authentication and login
- Role-based access control
- Activity logs and audit trail
- Data backup and recovery
-Notification System
- Low-stock alerts
- Production deadline reminders
- Pending order notifications
- Supplier delivery alerts
-Dashboard Features
- Real-time inventory status
- Daily sales monitoring
- Production progress overview
- Revenue and performance visualization
