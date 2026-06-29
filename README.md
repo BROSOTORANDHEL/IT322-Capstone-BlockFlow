@@ -27,6 +27,8 @@
 
    *June 29*
       appyling the suggestion of the panelist to out paper
+
+   
 **Codizal, Cresmarie**
 1. Manuscript for Capstone
    - Arrange the Objectives of the Study
