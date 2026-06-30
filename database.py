@@ -32,3 +32,24 @@ def add_expense_to_db(category: str, description: str, amount: float, date_recor
     conn.commit()
     conn.close()
     return True
+
+def add_expense_to_db(title, category, description, amount, date_recorded):
+    """
+    Inserts a newly recorded expense entry into blockflow.db
+    """
+    try:
+        conn = sqlite3.connect("blockflow.db")
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO expenses (title, category, description, amount, date_recorded)
+            VALUES (?, ?, ?, ?, ?)
+        """, (title, category, description, amount, date_recorded))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"❌ Database Error inside add_expense_to_db: {e}")
+        return False
+    finally:
+        conn.close()
