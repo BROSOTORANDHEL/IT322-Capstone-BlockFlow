@@ -36,6 +36,6 @@ def login_handler(login_data: LoginSchema):
         "user": {
             "id": user['id'],
             "email": user['email'],
-            "role": user['role'] # Returns 'owner' or 'client'
+            "role": user['role'] 
         }
     }
