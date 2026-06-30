@@ -1,4 +1,3 @@
-# init_db.py
 import sqlite3
 import hashlib
 
@@ -6,7 +5,7 @@ def initialize():
     conn = sqlite3.connect("blockflow.db")
     cursor = conn.cursor()
     
-    # 1. Create the table
+    # 1. Create the users table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15,11 +14,23 @@ def initialize():
         role TEXT NOT NULL
     );
     """)
+
+    # 2. Create the expenses table (So your transaction route works!)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        amount REAL NOT NULL,
+        category TEXT NOT NULL,
+        description TEXT,
+        date_recorded TEXT NOT NULL
+    );
+    """)
     
     # Generate the SHA-256 password hash for Admin123
     hashed_password = hashlib.sha256("Admin123".encode('utf-8')).hexdigest()
     
-    # 2. Insert Owner and Client accounts safely
+    # 3. Insert Owner and Client accounts safely
     try:
         cursor.execute(
             "INSERT INTO users (email, password, role) VALUES (?, ?, ?)", 
