@@ -21,3 +21,4 @@ def record_expense(expense_data: ExpenseSchema):
             return {"status": "success", "message": "Expense entry logged successfully!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
