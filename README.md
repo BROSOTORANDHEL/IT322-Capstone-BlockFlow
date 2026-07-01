@@ -68,6 +68,13 @@ Reporting and Analytics
  Production efficiency reports
  Revenue and profit analysis
 
+**July 01,2026**
+The others explanation for the Research design is missing, like the owner so I put the owner in others explanation to align it.
+     The system is specifically designed for the owners and designated staff of Magalin Hollow Blocks Trading. Through iterative development cycles, the owners will gain early access to the centralized dashboard, a core objective of the study to monitor current stock levels, daily sales, overall expenses, and profit calculations in real-time. Concurrently, the staff will use the system to digitize the recording of raw material expenses, maintenance costs, and daily hollow block sales. But the owner can also access to monitor the system. By working in these iterative stages, the researchers can ensure that essential tools, such as the inventory management module for tracking cement and sand, are robust and user-friendly before integrating more complex analytical components.
+     To facilitate a smooth transition from manual bookkeeping, the system will prioritize a simple and intuitive data entry interface for daily operations. As development progresses, the user interface, designed initially with Figma, will be refined based on how employees interact with the system. The primary goal is to enable staff to migrate their existing records seamlessly, ensuring that every logged sale automatically updates the available stock within the MySQL database and removes the need for manual calculations and the owner can support ideas by monitoring the system to improve the business. This addresses the high risk of inaccurate financial reports highlighted in the study.
+
+
+
 **Brosoto, Randhel**
 1. Manuscript
    -apply the recommendation of the panel
