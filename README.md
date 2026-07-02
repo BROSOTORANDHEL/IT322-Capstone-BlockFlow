@@ -68,6 +68,13 @@ Reporting and Analytics
  Production efficiency reports
  Revenue and profit analysis
 
+**July 01,2026**
+The others explanation for the Research design is missing, like the owner so I put the owner in others explanation to align it.
+     The system is specifically designed for the owners and designated staff of Magalin Hollow Blocks Trading. Through iterative development cycles, the owners will gain early access to the centralized dashboard, a core objective of the study to monitor current stock levels, daily sales, overall expenses, and profit calculations in real-time. Concurrently, the staff will use the system to digitize the recording of raw material expenses, maintenance costs, and daily hollow block sales. But the owner can also access to monitor the system. By working in these iterative stages, the researchers can ensure that essential tools, such as the inventory management module for tracking cement and sand, are robust and user-friendly before integrating more complex analytical components.
+     To facilitate a smooth transition from manual bookkeeping, the system will prioritize a simple and intuitive data entry interface for daily operations. As development progresses, the user interface, designed initially with Figma, will be refined based on how employees interact with the system. The primary goal is to enable staff to migrate their existing records seamlessly, ensuring that every logged sale automatically updates the available stock within the MySQL database and removes the need for manual calculations and the owner can support ideas by monitoring the system to improve the business. This addresses the high risk of inaccurate financial reports highlighted in the study.
+
+
+
 **Brosoto, Randhel**
 1. Manuscript
    -apply the recommendation of the panel
@@ -95,3 +102,28 @@ Reporting and Analytics
 
 7. Applyign the suggestion of the panelist to the objective and other part of the paper
 8. 
+
+**Julongbayan, Mary Rose**
+
+Manuscript
+   1.Align Context Diagram with Use Case Diagram
+   2.Revise Chapter 2
+   3.Revise Chapter 3
+   4.Verify all references and sources
+   5.Update Use Case Descriptions
+1. Manuscript
+     - Align Context Diagram with Use Case Diagram
+     - Revise Chapter 2
+     - Revise Chapter 3
+     - Verify all references and sources
+     - Update Use Case Descriptions
+  
+       *june 22, 2026*
+
+*PyQt6*
+
+PyQt6 can be used in the study, as it allows enhancing the daily operational workflow of Magalin Hollow Blocks Trading by providing a customized desktop installation tailored specifically for the staff and owner of the business. . By designing the application through this framework, the system provides a structured visual environment that guarantees the accurate and efficient execution of daily tasks such as recording raw material expenses, updating current available stock, and monitoring the predictive profit calculations effectively replacing their error-prone manual spreadsheets.
+
+*PyMySQL*
+
+PyMySQL can be used in the study, as it allows enhancing the data-driven capabilities of BlockFlow by serving as the vital bridge between the Python-based predictive analytics engine and the MySQL database records of Magalin Hollow Blocks Trading. Within the system architecture, the connector will be responsible for fetching the three-month historical sales data required for the autoregressive model and saving the resulting production forecasts back into the database for display on the centralized dashboard. Furthermore, it facilitates the real-time processing of daily hollow block inventories and customer transactions, ensuring that every operational change made by the cashier, staff, or owner is instantly reflected in the database  to maintain data integrity across the entire management system. 
