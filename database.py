@@ -82,3 +82,42 @@ def add_expense_to_db(category: str, description: str, amount: float, date_recor
         return False
     finally:
         conn.close()
+
+# =====================================================================
+# SALES FUNCTIONS
+# =====================================================================
+
+def add_sale_to_db(customer_name: str, shop_name: str, block_size: str, quantity: int, sale_date: str):
+    """
+    Inserts a newly recorded sales transaction into blockflow.db.
+    Matches the Figma Record Sale modal dataset perfectly!
+    """
+    try:
+        conn = sqlite3.connect("blockflow.db")
+        cursor = conn.cursor()
+        
+        # Ensure the sales table matches your UI fields
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sales (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                customer_name TEXT NOT NULL,
+                shop_name TEXT NOT NULL,
+                block_size TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                sale_date TEXT NOT NULL,
+                date_logged TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        cursor.execute("""
+            INSERT INTO sales (customer_name, shop_name, block_size, quantity, sale_date)
+            VALUES (?, ?, ?, ?, ?)
+        """, (customer_name, shop_name, block_size, int(quantity), sale_date))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"❌ Database Error inside add_sale_to_db: {e}")
+        return False
+    finally:
+        conn.close()
