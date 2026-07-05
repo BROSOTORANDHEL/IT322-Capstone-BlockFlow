@@ -123,3 +123,6 @@ PyMySQL can be used in the study, as it allows enhancing the data-driven capabil
 
 **july 1, 2026**
 fixing the conflict to the github repository
+
+**july 5, 2026**
+suggestion of design of the gui and colors
