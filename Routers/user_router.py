@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from Handlers.user_handler import login_handler
 from database import add_expense_to_db, add_stock_to_db, add_sale_to_db
+from database import add_expense_to_db, add_stock_to_db
 
 router = APIRouter()
 
@@ -26,6 +27,12 @@ class SaleSchema(BaseModel):
 
 router.post("/login")(login_handler)
 
+
+# 1. User Authentication
+router.post("/login")(login_handler)
+
+# 2. Record New Business Expense
+
 @router.post("/expenses", status_code=201)
 def record_expense(expense_data: ExpenseSchema):
     """
@@ -41,11 +48,15 @@ def record_expense(expense_data: ExpenseSchema):
         )
         if success:
             return {"status": "success", "message": "Expense entry logged across all tables successfully!"}
+            return {"status": "success", "message": "Expense entry logged successfully!"}
+
         else:
             raise HTTPException(status_code=400, detail="Failed to save expense entry.")
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# 3. Record New Stock (Inventory Management from your Figma mockup)
 
 @router.post("/inventory", status_code=201)
 def record_new_stock(stock_data: InventoryStockSchema):
@@ -67,6 +78,8 @@ def record_new_stock(stock_data: InventoryStockSchema):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# 4. Record New Sale (Sales Tracking from your Figma mockup)
+
 @router.post("/sales", status_code=201)
 def record_sale(sale_data: SaleSchema):
     """
@@ -84,6 +97,27 @@ def record_sale(sale_data: SaleSchema):
             return {"status": "success", "message": f"Sale for {sale_data.customer_name} recorded successfully!"}
         else:
             raise HTTPException(status_code=400, detail="Failed to save sales record.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 3. Record New Stock (Inventory Management from your Figma mockup)
+@router.post("/inventory", status_code=201)
+def record_new_stock(stock_data: InventoryStockSchema):
+    """
+    API endpoint that receives incoming stock creation data from the client form modal.
+    """
+    try:
+        success = add_stock_to_db(
+            item_name=stock_data.item_name,
+            size=stock_data.size,
+            quantity=stock_data.quantity,
+            unit=stock_data.unit
+        )
+        if success:
+            return {"status": "success", "message": f"{stock_data.item_name} stock logged successfully!"}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to log new inventory stock.")
+
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

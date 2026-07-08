@@ -54,6 +54,7 @@ def add_expense_to_db(category: str, description: str, amount: float, date_recor
         conn = sqlite3.connect("blockflow.db")
         cursor = conn.cursor()
         
+        # Ensure table exists with parameters matching your UI
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS expenses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
