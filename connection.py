@@ -1,6 +1,5 @@
 import requests
 
-# 1. Base URL of your running FastAPI server
 BASE_URL = "http://127.0.0.1:8000"
 
 def send_register_data(email, password):
@@ -60,21 +59,18 @@ def send_expense_data(title, amount, category, description, date_recorded):
         print("❌ Connection Error: Ensure Uvicorn is running.")
         return None
 
-# --- Quick Terminal Execution Block ---
 if __name__ == "__main__":
     print("--- Running Connection Test BlockFlow Backend ---")
     
     test_email = "absolutely_fresh_200@example.com"
     test_password = "password123"
 
-    # Test 1: Sign Up / Register the account first
     print("\nAttempting to Register New Account...")
     register_result = send_register_data(email=test_email, password=test_password)
     if register_result is not None:
         print(f"Register Status Code: {register_result.status_code}")
         print(f"Register Response: {register_result.text}")
 
-    # Test 2: Simulating a Login Connection (Now that the account is registered)
     print("\nSending Test Login...")
     login_result = send_login_data(email=test_email, password=test_password)
     if login_result is not None:
@@ -84,7 +80,6 @@ if __name__ == "__main__":
         else:
             print(f"Login Error Details: {login_result.text}")
 
-    # Test 3: Simulating Recording an Expense Connection
     print("\nSending Test Expense Entry...")
     expense_result = send_expense_data(
         title="Internet Subscription", 
