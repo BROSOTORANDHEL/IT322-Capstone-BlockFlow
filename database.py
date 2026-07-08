@@ -1,145 +1,131 @@
 import sqlite3
 
 def get_db_connection():
-    """
-    Connects to the local file database right inside your project folder.
-    Configured to return rows as dictionary-like objects.
-    """
     conn = sqlite3.connect("blockflow.db")
     conn.row_factory = sqlite3.Row
     return conn
 
+# --- DUAL-TABLE AUTOMATION FUNCTIONS ---
 
-def add_stock_to_db(item_name: str, size: str, quantity: int, unit: str):
-    """
-    Inserts a newly recorded inventory/stock entry into blockflow.db.
-    Matches your Figma Record New Stock UI modal data perfectly!
-    """
+def record_expense(expense_name, amount, category, date_added):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "INSERT INTO expenses (expense_name, amount, category, date_added) VALUES (?, ?, ?, ?)",
+        (expense_name, amount, category, date_added)
+    )
+    
+    cursor.execute(
+        "INSERT INTO dashboard (title, amount, type, date_record) VALUES (?, ?, 'expense', ?)",
+        (expense_name, amount, date_added)
+    )
+    
+    conn.commit()
+    conn.close()
+
+def record_new_stock(item_name, quantity, price, date_added):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "INSERT INTO inventory (item_name, quantity, price, date_added) VALUES (?, ?, ?, ?)",
+        (item_name, quantity, price, date_added)
+    )
+    
+    total_cost = float(price) * int(quantity)
+    cursor.execute(
+        "INSERT INTO dashboard (title, amount, type, date_record) VALUES (?, ?, 'inventory', ?)",
+        (f"Stocked: {item_name}", total_cost, date_added)
+    )
+    
+    conn.commit()
+    conn.close()
+
+def record_sale(customer_name, shop_name, block_size, quantity, sale_date):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Keeping your custom sales data format completely intact
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sales (
+            customer_name TEXT,
+            shop_name TEXT,
+            block_size TEXT,
+            quantity INTEGER,
+            sale_date TEXT
+        )
+    """)
+    
+    cursor.execute(
+        "INSERT INTO sales (customer_name, shop_name, block_size, quantity, sale_date) VALUES (?, ?, ?, ?, ?)",
+        (customer_name, shop_name, block_size, quantity, sale_date)
+    )
+    
+    # Syncing transaction detail straight to your timeline log table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dashboard (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            amount REAL,
+            type TEXT,
+            date_record TEXT
+        )
+    """)
+    
+    # FIX: Matching exactly 4 placeholders (?) with 4 variable inputs
+    sale_title = f"{block_size} x{quantity} - {customer_name} ({shop_name})"
+    cursor.execute(
+        "INSERT INTO dashboard (title, amount, type, date_record) VALUES (?, ?, ?, ?)",
+        (sale_title, float(quantity), 'sale', sale_date)
+    )
+    
+    conn.commit()
+    conn.close()
+
+# --- UNIFIED TRANSACTION HISTORY LOG ---
+
+def get_transaction_history():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    history = []
+    
+    # 1. Fetch from master dashboard log table
     try:
-        conn = sqlite3.connect("blockflow.db")
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS inventory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_name TEXT NOT NULL,
-                size TEXT NOT NULL,
-                quantity INTEGER NOT NULL,
-                unit TEXT NOT NULL,
-                date_recorded TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            INSERT INTO inventory (item_name, size, quantity, unit)
-            VALUES (?, ?, ?, ?)
-        """, (item_name, size, int(quantity), unit))
-        
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"❌ Database Error inside add_stock_to_db: {e}")
-        return False
-    finally:
-        conn.close()
+        cursor.execute("SELECT id, title, amount, type, date_record FROM dashboard ORDER BY id DESC")
+        for row in cursor.fetchall():
+            history.append({
+                "id": row["id"],
+                "title": row["title"],
+                "amount": row["amount"],
+                "type": row["type"],
+                "date": row["date_record"]
+            })
+    except sqlite3.OperationalError:
+        pass
 
-
-def add_expense_to_db(category: str, description: str, amount: float, date_recorded: str):
-    """
-    Safely creates the expenses table and inserts a 4-argument expense entry,
-    while simultaneously generating a dedicated dashboard analytics table
-    storing exclusively the amount and automatic timestamps.
-    """
+    # 2. SAFETY NET: Automatically scan existing past sales records if dashboard log is blank
     try:
-        conn = sqlite3.connect("blockflow.db")
-        cursor = conn.cursor()
+        cursor.execute("SELECT rowid, customer_name, shop_name, block_size, quantity, sale_date FROM sales")
+        for row in cursor.fetchall():
+            sale_title = f"{row['block_size']} x{row['quantity']} - {row['customer_name']} ({row['shop_name']})"
+            
+            # Prevent duplicates if they match title and date
+            already_tracked = any(item["title"] == sale_title and item["date"] == row["sale_date"] for item in history)
+            
+            if not already_tracked:
+                history.append({
+                    "id": row["rowid"],
+                    "title": sale_title,
+                    "amount": float(row["quantity"]),
+                    "type": "sale",
+                    "date": row["sale_date"]
+                })
+    except sqlite3.OperationalError:
+        pass
         
-        # Ensure table exists with parameters matching your UI
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS expenses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                category TEXT NOT NULL,
-                description TEXT NOT NULL,
-                amount REAL NOT NULL,
-                date_recorded TEXT NOT NULL,
-                date_logged TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS dashboard_expenses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                amount REAL NOT NULL,
-                date_logged TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            INSERT INTO expenses (category, description, amount, date_recorded)
-            VALUES (?, ?, ?, ?)
-        """, (category, description, amount, date_recorded))
-        
-        cursor.execute("""
-            INSERT INTO dashboard_expenses (amount)
-            VALUES (?)
-        """, (amount,))
-        
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"❌ Database Error inside dual-insert add_expense_to_db: {e}")
-        return False
-    finally:
-        conn.close()
-
-
-def add_sale_to_db(customer_name: str, shop_name: str, block_size: str, quantity: int, sale_date: str):
-    """
-    Inserts a newly recorded sales transaction into blockflow.db.
-    Simultaneously handles automatic dual-inserting into a dedicated 
-    dashboard analytics table matching your expense logic.
-    """
-    try:
-        conn = sqlite3.connect("blockflow.db")
-        cursor = conn.cursor()
-        
-        # 1. Ensure both the master sales table and dashboard tracker exist
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS sales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                customer_name TEXT NOT NULL,
-                shop_name TEXT NOT NULL,
-                block_size TEXT NOT NULL,
-                quantity INTEGER NOT NULL,
-                sale_date TEXT NOT NULL,
-                date_logged TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS dashboard_sales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                quantity INTEGER NOT NULL,
-                date_logged TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # 2. Insert master history log entry
-        cursor.execute("""
-            INSERT INTO sales (customer_name, shop_name, block_size, quantity, sale_date)
-            VALUES (?, ?, ?, ?, ?)
-        """, (customer_name, shop_name, block_size, int(quantity), sale_date))
-        
-        # 3. Automatically mirror metrics into the dashboard analysis table
-        cursor.execute("""
-            INSERT INTO dashboard_sales (quantity)
-            VALUES (?)
-        """, (int(quantity),))
-        
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"❌ Database Error inside dual-insert add_sale_to_db: {e}")
-        return False
-    finally:
-        conn.close()
+    conn.close()
+    
+    # Sort chronologically, newest entries first
+    history.sort(key=lambda x: x['date'] if x['date'] else "", reverse=True)
+    return history
