@@ -2,11 +2,9 @@ import sqlite3
 import hashlib
 
 def initialize():
-    # Connects directly to your local file system database instance
     conn = sqlite3.connect("blockflow.db")
     cursor = conn.cursor()
     
-    # 1. Create the Users Authentication Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,8 +14,6 @@ def initialize():
     );
     """)
     
-    # 2. Create the Inventory / Stock Recording Table 
-    # Perfectly fits your item name, structural size variations, total quantity, and core units!
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,10 +25,8 @@ def initialize():
     );
     """)
     
-    # Generate the SHA-256 password hash signature for standard credentials
     hashed_password = hashlib.sha256("Admin123".encode('utf-8')).hexdigest()
     
-    # 3. Safely populate system administrative roles
     try:
         cursor.execute(
             "INSERT INTO users (email, password, role) VALUES (?, ?, ?)", 

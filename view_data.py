@@ -4,7 +4,6 @@ def check_my_tables():
     conn = sqlite3.connect("blockflow.db")
     cursor = conn.cursor()
     
-    # 1. Check Sales
     print("\n--- 📈 RECORDED SALES ---")
     try:
         cursor.execute("SELECT * FROM sales")
@@ -14,7 +13,6 @@ def check_my_tables():
     except sqlite3.OperationalError:
         print("Sales table does not exist yet.")
 
-    # 2. Check Inventory
     print("\n--- 🧱 RECORDED INVENTORY STOCK ---")
     try:
         cursor.execute("SELECT * FROM inventory")

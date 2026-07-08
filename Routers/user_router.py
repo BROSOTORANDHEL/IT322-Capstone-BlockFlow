@@ -2,16 +2,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from Handlers.user_handler import login_handler
 from database import add_expense_to_db, add_stock_to_db, add_sale_to_db
-<<<<<<< HEAD
 from database import add_expense_to_db, add_stock_to_db
-=======
->>>>>>> fcfa3989723de12fe303f088a0758b065bd2362e
 
 router = APIRouter()
-
-# =====================================================================
-# REQUEST SCHEMAS (Validation Layouts)
-# =====================================================================
 
 class ExpenseSchema(BaseModel):
     category: str
@@ -32,30 +25,19 @@ class SaleSchema(BaseModel):
     quantity: int
     sale_date: str
 
-# =====================================================================
-# ENDPOINTS
-# =====================================================================
-
-# 1. User Authentication
 router.post("/login")(login_handler)
 
-<<<<<<< HEAD
 
 # 1. User Authentication
 router.post("/login")(login_handler)
 
 # 2. Record New Business Expense
-=======
-# 2. Record New Business Expense (Automated Multi-Table Route)
->>>>>>> fcfa3989723de12fe303f088a0758b065bd2362e
+
 @router.post("/expenses", status_code=201)
 def record_expense(expense_data: ExpenseSchema):
     """
     API endpoint to log business expenses using 4-argument mapping.
-<<<<<<< HEAD
-=======
     Populates both the master history list and dashboard tracker table.
->>>>>>> fcfa3989723de12fe303f088a0758b065bd2362e
     """
     try:
         success = add_expense_to_db(
@@ -65,22 +47,17 @@ def record_expense(expense_data: ExpenseSchema):
             date_recorded=expense_data.date_recorded
         )
         if success:
-<<<<<<< HEAD
-            return {"status": "success", "message": "Expense entry logged successfully!"}
-=======
             return {"status": "success", "message": "Expense entry logged across all tables successfully!"}
->>>>>>> fcfa3989723de12fe303f088a0758b065bd2362e
+            return {"status": "success", "message": "Expense entry logged successfully!"}
+
         else:
             raise HTTPException(status_code=400, detail="Failed to save expense entry.")
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-<<<<<<< HEAD
 # 3. Record New Stock (Inventory Management from your Figma mockup)
-=======
-# 3. Record New Stock (Inventory Management)
->>>>>>> fcfa3989723de12fe303f088a0758b065bd2362e
+
 @router.post("/inventory", status_code=201)
 def record_new_stock(stock_data: InventoryStockSchema):
     """
@@ -101,11 +78,8 @@ def record_new_stock(stock_data: InventoryStockSchema):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-<<<<<<< HEAD
 # 4. Record New Sale (Sales Tracking from your Figma mockup)
-=======
-# 4. Record New Sale (Sales Tracking)
->>>>>>> fcfa3989723de12fe303f088a0758b065bd2362e
+
 @router.post("/sales", status_code=201)
 def record_sale(sale_data: SaleSchema):
     """
@@ -123,7 +97,6 @@ def record_sale(sale_data: SaleSchema):
             return {"status": "success", "message": f"Sale for {sale_data.customer_name} recorded successfully!"}
         else:
             raise HTTPException(status_code=400, detail="Failed to save sales record.")
-<<<<<<< HEAD
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -144,8 +117,7 @@ def record_new_stock(stock_data: InventoryStockSchema):
             return {"status": "success", "message": f"{stock_data.item_name} stock logged successfully!"}
         else:
             raise HTTPException(status_code=400, detail="Failed to log new inventory stock.")
-=======
->>>>>>> fcfa3989723de12fe303f088a0758b065bd2362e
+
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
