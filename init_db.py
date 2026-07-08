@@ -5,7 +5,6 @@ def initialize():
     conn = sqlite3.connect("blockflow.db")
     cursor = conn.cursor()
     
-    # 1. Create the users table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -14,23 +13,20 @@ def initialize():
         role TEXT NOT NULL
     );
     """)
-
-    # 2. Create the expenses table (So your transaction route works!)
+    
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS expenses (
+    CREATE TABLE IF NOT EXISTS inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        amount REAL NOT NULL,
-        category TEXT NOT NULL,
-        description TEXT,
-        date_recorded TEXT NOT NULL
+        item_name TEXT NOT NULL,
+        size TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit TEXT NOT NULL,
+        date_recorded TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
     
-    # Generate the SHA-256 password hash for Admin123
     hashed_password = hashlib.sha256("Admin123".encode('utf-8')).hexdigest()
     
-    # 3. Insert Owner and Client accounts safely
     try:
         cursor.execute(
             "INSERT INTO users (email, password, role) VALUES (?, ?, ?)", 
@@ -41,9 +37,9 @@ def initialize():
             ("client@user.com", hashed_password, "client")
         )
         conn.commit()
-        print("Database initialized and mock accounts inserted successfully!")
+        print("🟢 Database initialized successfully! Core users and stock recording schemas are live.")
     except sqlite3.IntegrityError:
-        print("Database already initialized with users.")
+        print("ℹ️ Database records already contain seeded structural users. Inventory schema confirmed.")
     finally:
         conn.close()
 
