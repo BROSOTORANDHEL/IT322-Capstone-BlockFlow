@@ -126,3 +126,6 @@ fixing the conflict to the github repository
 
 **july 5, 2026**
 suggestion of design of the gui and colors
+
+**july 10, 2026**
+Design planning
