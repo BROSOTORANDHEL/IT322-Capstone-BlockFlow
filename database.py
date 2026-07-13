@@ -46,7 +46,6 @@ def record_sale(customer_name, shop_name, block_size, quantity, sale_date):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Keeping your custom sales data format completely intact
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS sales (
             customer_name TEXT,
@@ -62,7 +61,6 @@ def record_sale(customer_name, shop_name, block_size, quantity, sale_date):
         (customer_name, shop_name, block_size, quantity, sale_date)
     )
     
-    # Syncing transaction detail straight to your timeline log table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS dashboard (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,7 +71,6 @@ def record_sale(customer_name, shop_name, block_size, quantity, sale_date):
         )
     """)
     
-    # FIX: Matching exactly 4 placeholders (?) with 4 variable inputs
     sale_title = f"{block_size} x{quantity} - {customer_name} ({shop_name})"
     cursor.execute(
         "INSERT INTO dashboard (title, amount, type, date_record) VALUES (?, ?, ?, ?)",
@@ -90,7 +87,6 @@ def get_transaction_history():
     cursor = conn.cursor()
     history = []
     
-    # 1. Fetch from master dashboard log table
     try:
         cursor.execute("SELECT id, title, amount, type, date_record FROM dashboard ORDER BY id DESC")
         for row in cursor.fetchall():
@@ -104,13 +100,10 @@ def get_transaction_history():
     except sqlite3.OperationalError:
         pass
 
-    # 2. SAFETY NET: Automatically scan existing past sales records if dashboard log is blank
     try:
         cursor.execute("SELECT rowid, customer_name, shop_name, block_size, quantity, sale_date FROM sales")
         for row in cursor.fetchall():
             sale_title = f"{row['block_size']} x{row['quantity']} - {row['customer_name']} ({row['shop_name']})"
-            
-            # Prevent duplicates if they match title and date
             already_tracked = any(item["title"] == sale_title and item["date"] == row["sale_date"] for item in history)
             
             if not already_tracked:
@@ -125,7 +118,39 @@ def get_transaction_history():
         pass
         
     conn.close()
-    
-    # Sort chronologically, newest entries first
     history.sort(key=lambda x: x['date'] if x['date'] else "", reverse=True)
     return history
+
+
+# --- NEW USER AUTHENTICATION HELPERS (ADDED BELOW) ---
+
+def register_user(email, password, role):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Check if user already exists
+    cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
+    if cursor.fetchone():
+        conn.close()
+        return False 
+
+    # Save the new user record
+    cursor.execute(
+        "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
+        (email, password, role)
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+def verify_user_login(email, password):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT role FROM users WHERE email = ? AND password = ?", (email, password))
+    user = cursor.fetchone()
+    conn.close()
+    
+    if user:
+        return {"status": "success", "role": user["role"]}
+    return None

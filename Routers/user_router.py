@@ -1,6 +1,13 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from database import record_expense, record_new_stock, record_sale, get_transaction_history
+from database import (
+    record_expense, 
+    record_new_stock, 
+    record_sale, 
+    get_transaction_history,
+    register_user,      
+    verify_user_login   
+)
 
 router = APIRouter()
 
@@ -25,21 +32,36 @@ class SalesRequest(BaseModel):
     quantity: int
     sale_date: str
 
+# --- AUTHENTICATION SCHEMAS ---
+
 class LoginRequest(BaseModel):
-    username: str
+    email: str  
     password: str
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    role: str
 
 # --- ROUTE ENDPOINTS ---
 
 @router.post("/login")
 def login(data: LoginRequest):
-    if data.username == "admin" and data.password == "password":
-        return {"status": "success", "message": "Logged in successfully"}
-    raise HTTPException(status_code=400, detail="Invalid credentials")
+    user_match = verify_user_login(data.email, data.password)
+    if user_match:
+        return {
+            "status": "success", 
+            "message": "Logged in successfully", 
+            "role": user_match["role"]
+        }
+    raise HTTPException(status_code=400, detail="Invalid email or password credentials")
 
 @router.post("/register")
-def register():
-    return {"status": "success", "message": "User registration endpoint shell"}
+def register(data: RegisterRequest):
+    success = register_user(data.email, data.password, data.role)
+    if not success:
+        raise HTTPException(status_code=400, detail="This email is already registered!")
+    return {"status": "success", "message": "Account created successfully!"}
 
 @router.post("/expenses")
 def add_expense(data: ExpenseRequest):
@@ -52,7 +74,7 @@ def add_expense(data: ExpenseRequest):
 @router.post("/inventory")
 def add_inventory(data: InventoryRequest):
     try:
-        record_new_stock(data.item_name, data.quantity, data.price, data.date_added)
+        record_new_stock(item_name=data.item_name, quantity=data.quantity, price=data.price, date_added=data.date_added)
         return {"status": "success", "message": "Inventory restock tracked!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -61,11 +83,11 @@ def add_inventory(data: InventoryRequest):
 def add_sale(data: SalesRequest):
     try:
         record_sale(
-            data.customer_name, 
-            data.shop_name, 
-            data.block_size, 
-            data.quantity, 
-            data.sale_date
+            customer_name=data.customer_name, 
+            shop_name=data.shop_name, 
+            block_size=data.block_size, 
+            quantity=data.quantity, 
+            sale_date=data.sale_date
         )
         return {"status": "success", "message": "Sale logged successfully!"}
     except Exception as e:
