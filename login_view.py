@@ -90,7 +90,6 @@ class BlockFlowLogin(QWidget):
         card_layout.addWidget(role_label)
         card_layout.addWidget(self.role_box)
 
-        # Updated to request Email Address to match your SQLite schema tracking
         user_label = QLabel("Email Address")
         user_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         self.user_input = QLineEdit()
@@ -127,7 +126,7 @@ class BlockFlowLogin(QWidget):
         main_layout.addWidget(card)
         self.setLayout(main_layout)
 
-        # Connect button click triggers to the API event operations
+        # Connect button click triggers
         self.login_btn.clicked.connect(self.handle_api_login)
         self.register_btn.clicked.connect(self.handle_api_registration)
         self.exit_btn.clicked.connect(self.close)
@@ -147,11 +146,23 @@ class BlockFlowLogin(QWidget):
 
             if response.status_code == 200:
                 data = response.json()
-                QMessageBox.information(self, "Login Successful", f"Welcome back!\nLogged in successfully as: {data.get('role')}")
-                # Next step dashboard redirection goes here
+                user_role = data.get('role', 'client')
+                
+                # 🚀 REDIRECTS AUTOMATICALLY WITHOUT THE POPUP ALERT BLOCK NOW
+                if "owner" in user_role.lower() or "admin" in user_role.lower():
+                    try:
+                        from dashboard_view import BlockFlowDashboard
+                        self.dashboard_window = BlockFlowDashboard()
+                        self.dashboard_window.showFullScreen()
+                        self.close()  # Safely closes login window
+                    except ImportError:
+                        QMessageBox.critical(self, "Import Error", "Could not find 'dashboard_view.py'. Ensure the file template exists!")
+                else:
+                    QMessageBox.information(self, "Access Granted", "Logged in successfully as a Staff Member.")
             else:
                 detail = response.json().get("detail", "Invalid credentials")
                 QMessageBox.critical(self, "Login Failed", f"Authentication Rejected:\n{detail}")
+                
         except requests.exceptions.ConnectionError:
             QMessageBox.critical(self, "Server Error", "Could not connect to the Backend server!\nMake sure App.py is running.")
 
@@ -161,7 +172,6 @@ class BlockFlowLogin(QWidget):
         password = self.pass_input.text()
         selected_role = self.role_box.currentText()
 
-        # Safely map UI dropdown selection to matching lowercase strings in your DB
         db_role = "owner" if "Admin" in selected_role else "client"
 
         if not email or not password:
@@ -183,7 +193,6 @@ class BlockFlowLogin(QWidget):
         except requests.exceptions.ConnectionError:
             QMessageBox.critical(self, "Server Error", "Could not connect to the Backend server!\nMake sure App.py is running.")
 
-    # Render background image pixel buffers beautifully
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#0F172A"))

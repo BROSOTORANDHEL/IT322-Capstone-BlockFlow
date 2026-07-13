@@ -1,123 +1,102 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from Handlers.user_handler import login_handler
-from database import add_expense_to_db, add_stock_to_db, add_sale_to_db
-from database import add_expense_to_db, add_stock_to_db
+from database import (
+    record_expense, 
+    record_new_stock, 
+    record_sale, 
+    get_transaction_history,
+    register_user,      
+    verify_user_login   
+)
 
 router = APIRouter()
 
-class ExpenseSchema(BaseModel):
-    category: str
-    description: str
+# --- ORIGINAL BUSINESS SCHEMAS ---
+
+class ExpenseRequest(BaseModel):
+    expense_name: str
     amount: float
-    date_recorded: str
+    category: str
+    date_added: str
 
-class InventoryStockSchema(BaseModel):
+class InventoryRequest(BaseModel):
     item_name: str
-    size: str
     quantity: int
-    unit: str
+    price: float
+    date_added: str
 
-class SaleSchema(BaseModel):
+class SalesRequest(BaseModel):
     customer_name: str
     shop_name: str
     block_size: str
     quantity: int
     sale_date: str
 
-router.post("/login")(login_handler)
+# --- AUTHENTICATION SCHEMAS ---
 
+class LoginRequest(BaseModel):
+    email: str  
+    password: str
 
-# 1. User Authentication
-router.post("/login")(login_handler)
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    role: str
 
-# 2. Record New Business Expense
+# --- ROUTE ENDPOINTS ---
 
-@router.post("/expenses", status_code=201)
-def record_expense(expense_data: ExpenseSchema):
-    """
-    API endpoint to log business expenses using 4-argument mapping.
-    Populates both the master history list and dashboard tracker table.
-    """
+@router.post("/login")
+def login(data: LoginRequest):
+    user_match = verify_user_login(data.email, data.password)
+    if user_match:
+        return {
+            "status": "success", 
+            "message": "Logged in successfully", 
+            "role": user_match["role"]
+        }
+    raise HTTPException(status_code=400, detail="Invalid email or password credentials")
+
+@router.post("/register")
+def register(data: RegisterRequest):
+    success = register_user(data.email, data.password, data.role)
+    if not success:
+        raise HTTPException(status_code=400, detail="This email is already registered!")
+    return {"status": "success", "message": "Account created successfully!"}
+
+@router.post("/expenses")
+def add_expense(data: ExpenseRequest):
     try:
-        success = add_expense_to_db(
-            category=expense_data.category,
-            description=expense_data.description,
-            amount=expense_data.amount,
-            date_recorded=expense_data.date_recorded
-        )
-        if success:
-            return {"status": "success", "message": "Expense entry logged across all tables successfully!"}
-            return {"status": "success", "message": "Expense entry logged successfully!"}
-
-        else:
-            raise HTTPException(status_code=400, detail="Failed to save expense entry.")
-            
+        record_expense(data.expense_name, data.amount, data.category, data.date_added)
+        return {"status": "success", "message": "Expense transaction saved!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 3. Record New Stock (Inventory Management from your Figma mockup)
-
-@router.post("/inventory", status_code=201)
-def record_new_stock(stock_data: InventoryStockSchema):
-    """
-    API endpoint that receives incoming stock creation data from the client form modal.
-    """
+@router.post("/inventory")
+def add_inventory(data: InventoryRequest):
     try:
-        success = add_stock_to_db(
-            item_name=stock_data.item_name,
-            size=stock_data.size,
-            quantity=stock_data.quantity,
-            unit=stock_data.unit
-        )
-        if success:
-            return {"status": "success", "message": f"{stock_data.item_name} stock logged successfully!"}
-        else:
-            raise HTTPException(status_code=400, detail="Failed to log new inventory stock.")
-            
+        record_new_stock(item_name=data.item_name, quantity=data.quantity, price=data.price, date_added=data.date_added)
+        return {"status": "success", "message": "Inventory restock tracked!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 4. Record New Sale (Sales Tracking from your Figma mockup)
-
-@router.post("/sales", status_code=201)
-def record_sale(sale_data: SaleSchema):
-    """
-    API endpoint that receives sales transaction submissions from the frontend modal.
-    """
+@router.post("/sales")
+def add_sale(data: SalesRequest):
     try:
-        success = add_sale_to_db(
-            customer_name=sale_data.customer_name,
-            shop_name=sale_data.shop_name,
-            block_size=sale_data.block_size,
-            quantity=sale_data.quantity,
-            sale_date=sale_data.sale_date
+        record_sale(
+            customer_name=data.customer_name, 
+            shop_name=data.shop_name, 
+            block_size=data.block_size, 
+            quantity=data.quantity, 
+            sale_date=data.sale_date
         )
-        if success:
-            return {"status": "success", "message": f"Sale for {sale_data.customer_name} recorded successfully!"}
-        else:
-            raise HTTPException(status_code=400, detail="Failed to save sales record.")
+        return {"status": "success", "message": "Sale logged successfully!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 3. Record New Stock (Inventory Management from your Figma mockup)
-@router.post("/inventory", status_code=201)
-def record_new_stock(stock_data: InventoryStockSchema):
-    """
-    API endpoint that receives incoming stock creation data from the client form modal.
-    """
+@router.get("/history")
+def view_transaction_history():
     try:
-        success = add_stock_to_db(
-            item_name=stock_data.item_name,
-            size=stock_data.size,
-            quantity=stock_data.quantity,
-            unit=stock_data.unit
-        )
-        if success:
-            return {"status": "success", "message": f"{stock_data.item_name} stock logged successfully!"}
-        else:
-            raise HTTPException(status_code=400, detail="Failed to log new inventory stock.")
-
-            
+        data = get_transaction_history()
+        return {"status": "success", "history": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
