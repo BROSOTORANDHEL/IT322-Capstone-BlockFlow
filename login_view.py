@@ -148,7 +148,7 @@ class BlockFlowLogin(QWidget):
                 data = response.json()
                 user_role = data.get('role', 'client')
                 
-                # 🚀 REDIRECTS AUTOMATICALLY WITHOUT THE POPUP ALERT BLOCK NOW
+                # 🚀 REDIRECT ADMIN/OWNER TO THE DASHBOARD
                 if "owner" in user_role.lower() or "admin" in user_role.lower():
                     try:
                         from dashboard_view import BlockFlowDashboard
@@ -157,8 +157,16 @@ class BlockFlowLogin(QWidget):
                         self.close()  # Safely closes login window
                     except ImportError:
                         QMessageBox.critical(self, "Import Error", "Could not find 'dashboard_view.py'. Ensure the file template exists!")
+                
+                # 📦 REDIRECT STAFF MEMBERS STRAIGHT TO INVENTORY VIEW
                 else:
-                    QMessageBox.information(self, "Access Granted", "Logged in successfully as a Staff Member.")
+                    try:
+                        from inventory_view import BlockFlowInventory
+                        self.inventory_window = BlockFlowInventory()
+                        self.inventory_window.showFullScreen()
+                        self.close()  # Safely closes login window
+                    except ImportError:
+                        QMessageBox.critical(self, "Import Error", "Could not find 'inventory_view.py'. Verify the filename capitalization!")
             else:
                 detail = response.json().get("detail", "Invalid credentials")
                 QMessageBox.critical(self, "Login Failed", f"Authentication Rejected:\n{detail}")
