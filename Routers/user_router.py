@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from database import (
+    get_db_connection,  # Imported to retrieve records for the GET endpoint
     record_expense, 
     record_new_stock, 
     record_sale, 
@@ -8,16 +9,19 @@ from database import (
     register_user,      
     verify_user_login   
 )
+import sqlite3
 
+# If your main App.py mounts this router with: app.include_router(router, prefix="/api")
+# then these endpoints will be accessed as "/api/login", "/api/expenses", etc.
 router = APIRouter()
 
-# --- ORIGINAL BUSINESS SCHEMAS ---
+# --- BUSINESS SCHEMAS ---
 
 class ExpenseRequest(BaseModel):
-    expense_name: str
-    amount: float
-    category: str
-    date_added: str
+    expense_name: str  # Maps to 'expense_name' sent by your frontend form
+    amount: float      # Pure float sent by your frontend form
+    category: str      # Selected from dropdown
+    date_added: str    # YYYY-MM-DD string format
 
 class InventoryRequest(BaseModel):
     item_name: str
@@ -63,10 +67,61 @@ def register(data: RegisterRequest):
         raise HTTPException(status_code=400, detail="This email is already registered!")
     return {"status": "success", "message": "Account created successfully!"}
 
+
+# GET /api/expenses
+# This endpoint dynamically pulls your live SQLite table data to keep the frontend updated!
+@router.get("/expenses")
+def get_expenses():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # CORRECTED: execute PRAGMA as standard SQL
+        cursor.execute("PRAGMA table_info(expenses)")
+        columns = [row["name"] for row in cursor.fetchall()]
+        
+        # Pull all saved rows from your database
+        cursor.execute("SELECT * FROM expenses ORDER BY id DESC")
+        rows = cursor.fetchall()
+        
+        expenses_list = []
+        for row in rows:
+            # Map description/expense_name depending on actual table structure
+            desc_val = row["description"] if "description" in columns else row.get("expense_name", "")
+            
+            # Map date_recorded/date_added depending on actual table structure
+            date_val = row["date_recorded"] if "date_recorded" in columns else row.get("date_added", "")
+            
+            expenses_list.append({
+                "id": row["id"],
+                "category": row["category"],
+                "description": desc_val,
+                "expense_name": desc_val, # Fallback mapping
+                "amount": row["amount"],
+                "date_recorded": date_val,
+                "date_added": date_val      # Fallback mapping
+            })
+            
+        conn.close()
+        return expenses_list
+        
+    except sqlite3.OperationalError as e:
+        raise HTTPException(status_code=500, detail=f"Database operational error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# POST /api/expenses
 @router.post("/expenses")
 def add_expense(data: ExpenseRequest):
     try:
-        record_expense(data.expense_name, data.amount, data.category, data.date_added)
+        # Executes record_expense with validated fields perfectly matching database types
+        record_expense(
+            expense_name=data.expense_name, 
+            amount=data.amount, 
+            category=data.category, 
+            date_added=data.date_added
+        )
         return {"status": "success", "message": "Expense transaction saved!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -96,7 +151,7 @@ def add_sale(data: SalesRequest):
 @router.get("/history")
 def view_transaction_history():
     try:
-        data = get_transaction_history()
-        return {"status": "success", "history": data}
+        # Return the list directly so the frontend is able to parse it without failing!
+        return get_transaction_history()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
