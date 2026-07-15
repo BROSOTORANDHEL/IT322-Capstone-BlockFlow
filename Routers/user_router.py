@@ -96,7 +96,7 @@ def add_sale(data: SalesRequest):
 @router.get("/history")
 def view_transaction_history():
     try:
-        data = get_transaction_history()
-        return {"status": "success", "history": data}
+        # Return the list directly so the frontend is able to parse it without failing the `isinstance` check!
+        return get_transaction_history()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

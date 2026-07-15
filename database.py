@@ -11,6 +11,16 @@ def record_expense(expense_name, amount, category, date_added):
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dashboard (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            amount REAL,
+            type TEXT,
+            date_record TEXT
+        )
+    """)
+    
     cursor.execute(
         "INSERT INTO expenses (expense_name, amount, category, date_added) VALUES (?, ?, ?, ?)",
         (expense_name, amount, category, date_added)
@@ -27,6 +37,16 @@ def record_expense(expense_name, amount, category, date_added):
 def record_new_stock(item_name, quantity, price, date_added):
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dashboard (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            amount REAL,
+            type TEXT,
+            date_record TEXT
+        )
+    """)
     
     cursor.execute(
         "INSERT INTO inventory (item_name, quantity, price, date_added) VALUES (?, ?, ?, ?)",
@@ -71,10 +91,26 @@ def record_sale(customer_name, shop_name, block_size, quantity, sale_date):
         )
     """)
     
-    sale_title = f"{block_size} x{quantity} - {customer_name} ({shop_name})"
+    # 1. Parse out the price per piece from the block size (e.g., "L (Large) - ₱7/pc")
+    price_per_pc = 7.0
+    if "7" in block_size:
+        price_per_pc = 7.0
+    elif "6" in block_size:
+        price_per_pc = 6.0
+    elif "5" in block_size:
+        price_per_pc = 5.0
+        
+    total_amount = float(quantity) * price_per_pc
+    
+    # 2. Build the title EXACTLY like your working mock data format:
+    # "L (Large) - ₱7/pc x1200 - Juan Dela Cruz (ABC Construction Supply)"
+    clean_size = block_size.strip()
+    sale_title = f"{clean_size} x{quantity} - {customer_name} ({shop_name})"
+    
+    # 3. Write to the dashboard table with the full cash amount (not just quantity!)
     cursor.execute(
-        "INSERT INTO dashboard (title, amount, type, date_record) VALUES (?, ?, ?, ?)",
-        (sale_title, float(quantity), 'sale', sale_date)
+        "INSERT INTO dashboard (title, amount, type, date_record) VALUES (?, ?, 'sale', ?)",
+        (sale_title, total_amount, sale_date)
     )
     
     conn.commit()
@@ -87,7 +123,18 @@ def get_transaction_history():
     cursor = conn.cursor()
     history = []
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS dashboard (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            amount REAL,
+            type TEXT,
+            date_record TEXT
+        )
+    """)
+    
     try:
+        # Fetch directly from dashboard - this matches your UI parser exactly!
         cursor.execute("SELECT id, title, amount, type, date_record FROM dashboard ORDER BY id DESC")
         for row in cursor.fetchall():
             history.append({
@@ -100,41 +147,32 @@ def get_transaction_history():
     except sqlite3.OperationalError:
         pass
 
-    try:
-        cursor.execute("SELECT rowid, customer_name, shop_name, block_size, quantity, sale_date FROM sales")
-        for row in cursor.fetchall():
-            sale_title = f"{row['block_size']} x{row['quantity']} - {row['customer_name']} ({row['shop_name']})"
-            already_tracked = any(item["title"] == sale_title and item["date"] == row["sale_date"] for item in history)
-            
-            if not already_tracked:
-                history.append({
-                    "id": row["rowid"],
-                    "title": sale_title,
-                    "amount": float(row["quantity"]),
-                    "type": "sale",
-                    "date": row["sale_date"]
-                })
-    except sqlite3.OperationalError:
-        pass
-        
     conn.close()
+    
+    # Sort history records by date (newest first)
     history.sort(key=lambda x: x['date'] if x['date'] else "", reverse=True)
     return history
 
 
-# --- NEW USER AUTHENTICATION HELPERS (ADDED BELOW) ---
+# --- USER AUTHENTICATION HELPERS ---
 
 def register_user(email, password, role):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Check if user already exists
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            email TEXT PRIMARY KEY,
+            password TEXT,
+            role TEXT
+        )
+    """)
+    
     cursor.execute("SELECT 1 FROM users WHERE email = ?", (email,))
     if cursor.fetchone():
         conn.close()
         return False 
 
-    # Save the new user record
     cursor.execute(
         "INSERT INTO users (email, password, role) VALUES (?, ?, ?)",
         (email, password, role)
@@ -146,6 +184,14 @@ def register_user(email, password, role):
 def verify_user_login(email, password):
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            email TEXT PRIMARY KEY,
+            password TEXT,
+            role TEXT
+        )
+    """)
     
     cursor.execute("SELECT role FROM users WHERE email = ? AND password = ?", (email, password))
     user = cursor.fetchone()
