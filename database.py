@@ -10,7 +10,7 @@ def ensure_schema_integrity():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Ensure dashboard table exists for UI timeline tracking
+    # 1. Dashboard timeline tracker
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS dashboard (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,7 +21,7 @@ def ensure_schema_integrity():
         )
     """)
     
-    # Ensure standard user table exists
+    # 2. Users Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             email TEXT PRIMARY KEY,
@@ -29,27 +29,145 @@ def ensure_schema_integrity():
             role TEXT
         )
     """)
+
+    # 3. Inventory Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_name TEXT,
+            quantity INTEGER,
+            size TEXT DEFAULT 'None',
+            unit TEXT DEFAULT 'pcs',
+            price REAL DEFAULT 0.0,
+            date_added TEXT,
+            date_recorded TEXT
+        )
+    """)
+
+    # --- AUTO-MIGRATIONS FOR INVENTORY ---
+    cursor.execute("PRAGMA table_info(inventory)")
+    inv_columns = [row[1] for row in cursor.fetchall()]
+    
+    migrations = {
+        "price": "REAL DEFAULT 0.0",
+        "date_added": "TEXT",
+        "date_recorded": "TEXT",
+        "size": "TEXT DEFAULT 'None'",
+        "unit": "TEXT DEFAULT 'pcs'"
+    }
+    
+    for col_name, col_type in migrations.items():
+        if col_name not in inv_columns:
+            try:
+                cursor.execute(f"ALTER TABLE inventory ADD COLUMN {col_name} {col_type}")
+            except sqlite3.OperationalError:
+                pass
     
     conn.commit()
     conn.close()
 
 ensure_schema_integrity()
 
-# --- ADAPTIVE EXPENSE RECORDING ---
+# --- RECORD NEW STOCK ---
+def record_new_stock(item_name, quantity, price, date_added, size="None", unit="pcs"):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("PRAGMA table_info(inventory)")
+    existing_columns = [row[1] for row in cursor.fetchall()]
+    
+    # Robust string cleaning for dropdown sizes (e.g., "L (Large) - ₱7/pc" -> "L")
+    clean_size = "None"
+    if size is not None:
+        size_str = str(size).strip()
+        if size_str and size_str.lower() != "none":
+            if "XL" in size_str:
+                clean_size = "XL"
+            elif "L" in size_str:
+                clean_size = "L"
+            else:
+                clean_size = size_str.split(" - ")[0].strip()
+
+    insert_cols = ["item_name", "quantity"]
+    insert_vals = [item_name, int(quantity or 0)]
+    
+    # Fill standard structural columns dynamically
+    if "price" in existing_columns:
+        insert_cols.append("price")
+        insert_vals.append(float(price or 0.0))
+        
+    if "date_added" in existing_columns:
+        insert_cols.append("date_added")
+        insert_vals.append(date_added)
+
+    if "date_recorded" in existing_columns:
+        insert_cols.append("date_recorded")
+        insert_vals.append(date_added)
+
+    if "size" in existing_columns:
+        insert_cols.append("size")
+        insert_vals.append(clean_size)
+
+    if "unit" in existing_columns:
+        insert_cols.append("unit")
+        insert_vals.append(str(unit).strip() if unit else "pcs")
+        
+    placeholders = ", ".join(["?"] * len(insert_vals))
+    col_names = ", ".join(insert_cols)
+    
+    query = f"INSERT INTO inventory ({col_names}) VALUES ({placeholders})"
+    cursor.execute(query, tuple(insert_vals))
+    
+    # Stock is an asset addition, we keep it positive to prevent it from reducing your profit metrics as a red negative
+    total_cost = float(price or 0.0) * int(quantity or 0)
+    
+    cursor.execute(
+        "INSERT INTO dashboard (title, amount, type, date_record) VALUES (?, ?, 'inventory', ?)",
+        (f"Stocked: {item_name}", total_cost, date_added)
+    )
+    
+    conn.commit()
+    conn.close()
+
+# --- CLEAN RECONCILED TRANSACTION HISTORY ---
+def get_transaction_history():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    history = []
+    
+    try:
+        # Pull cleanly from dashboard records only to eliminate all duplication across views
+        query = """
+            SELECT id, title, amount, type, date_record 
+            FROM dashboard 
+            ORDER BY date_record DESC, id DESC
+        """
+        cursor.execute(query)
+        for row in cursor.fetchall():
+            history.append({
+                "id": row["id"],
+                "title": row["title"],
+                "amount": row["amount"],
+                "type": row["type"],
+                "date": row["date_record"]
+            })
+    except sqlite3.OperationalError:
+        pass
+
+    conn.close()
+    history.sort(key=lambda x: x['date'] if x['date'] else "", reverse=True)
+    return history
+
 def record_expense(expense_name, amount, category, date_added):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. Query the actual columns currently present in your local 'expenses' database table
     cursor.execute("PRAGMA table_info(expenses)")
     existing_columns = [row[1] for row in cursor.fetchall()]
     
     insert_cols = []
     insert_vals = []
     
-    # 2. Map payload dynamically to match whatever columns exist in your schema
-    
-    # Map Description fields (satisfies NOT NULL constraint if 'description' is present)
     if "expense_name" in existing_columns:
         insert_cols.append("expense_name")
         insert_vals.append(expense_name)
@@ -57,7 +175,6 @@ def record_expense(expense_name, amount, category, date_added):
         insert_cols.append("description")
         insert_vals.append(expense_name)
         
-    # Map Date fields (satisfies NOT NULL constraint if 'date_recorded' is present)
     if "date_added" in existing_columns:
         insert_cols.append("date_added")
         insert_vals.append(date_added)
@@ -65,7 +182,6 @@ def record_expense(expense_name, amount, category, date_added):
         insert_cols.append("date_recorded")
         insert_vals.append(date_added)
         
-    # Map Amount & Category
     if "amount" in existing_columns:
         insert_cols.append("amount")
         insert_vals.append(amount)
@@ -73,37 +189,16 @@ def record_expense(expense_name, amount, category, date_added):
         insert_cols.append("category")
         insert_vals.append(category)
 
-    # 3. Build dynamic insert query matching local table schema
     if insert_cols:
         placeholders = ", ".join(["?"] * len(insert_vals))
         col_names = ", ".join(insert_cols)
         query = f"INSERT INTO expenses ({col_names}) VALUES ({placeholders})"
         cursor.execute(query, tuple(insert_vals))
     
-    # 4. Save to dashboard system for Admin tracking
+    # Expenses are marked negative so they are mathematically subtracted from profit calculations
     cursor.execute(
         "INSERT INTO dashboard (title, amount, type, date_record) VALUES (?, ?, 'expense', ?)",
-        (expense_name, amount, date_added)
-    )
-    
-    conn.commit()
-    conn.close()
-
-# --- OTHER OPERATIONS ---
-
-def record_new_stock(item_name, quantity, price, date_added):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute(
-        "INSERT INTO inventory (item_name, quantity, price, date_added) VALUES (?, ?, ?, ?)",
-        (item_name, quantity, price, date_added)
-    )
-    
-    total_cost = float(price) * int(quantity)
-    cursor.execute(
-        "INSERT INTO dashboard (title, amount, type, date_record) VALUES (?, ?, 'inventory', ?)",
-        (f"Stocked: {item_name}", total_cost, date_added)
+        (expense_name, -amount, date_added)
     )
     
     conn.commit()
@@ -137,62 +232,6 @@ def record_sale(customer_name, shop_name, block_size, quantity, sale_date):
     
     conn.commit()
     conn.close()
-
-# --- RECONCILED ADMIN TRANSACTION HISTORY ---
-def get_transaction_history():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    history = []
-    
-    try:
-        # Dynamically inspect columns in expenses table
-        cursor.execute("PRAGMA table_info(expenses)")
-        exp_cols = [row[1] for row in cursor.fetchall()]
-        
-        # Map dynamic description and date fields for the expenses portion
-        desc_col = "description" if "description" in exp_cols else ("expense_name" if "expense_name" in exp_cols else "''")
-        date_col = "date_recorded" if "date_recorded" in exp_cols else ("date_added" if "date_added" in exp_cols else "''")
-        
-        # SQL Union: Combines dashboard table entries AND raw expenses table entries 
-        # (Using a subquery with DISTINCT to prevent duplicate rendering of the same transaction)
-        query = f"""
-            SELECT DISTINCT id, title, amount, type, date_record FROM (
-                SELECT id, title, amount, type, date_record FROM dashboard
-                UNION ALL
-                SELECT id, {desc_col} AS title, amount, 'expense' AS type, {date_col} AS date_record FROM expenses
-            ) AS combined_history
-            GROUP BY title, amount, date_record  -- Prevents showing duplicates logged in both tables
-            ORDER BY date_record DESC, id DESC
-        """
-        
-        cursor.execute(query)
-        for row in cursor.fetchall():
-            history.append({
-                "id": row["id"],
-                "title": row["title"],
-                "amount": row["amount"],
-                "type": row["type"],
-                "date": row["date_record"]
-            })
-    except sqlite3.OperationalError:
-        # If any join tables don't exist yet, fallback gracefully to base dashboard
-        try:
-            cursor.execute("SELECT id, title, amount, type, date_record FROM dashboard ORDER BY id DESC")
-            for row in cursor.fetchall():
-                history.append({
-                    "id": row["id"],
-                    "title": row["title"],
-                    "amount": row["amount"],
-                    "type": row["type"],
-                    "date": row["date_record"]
-                })
-        except sqlite3.OperationalError:
-            pass
-
-    conn.close()
-    
-    history.sort(key=lambda x: x['date'] if x['date'] else "", reverse=True)
-    return history
 
 def register_user(email, password, role):
     conn = get_db_connection()
