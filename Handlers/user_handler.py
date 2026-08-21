@@ -1,37 +1,24 @@
-from fastapi import HTTPException, status
-from pydantic import BaseModel
-import hashlib
-from Models.user_model import UserModel
+"""Compatibility helpers for code that imports the original handler module."""
+
+from pydantic import BaseModel, Field
+
+from database import register_user, verify_user_login
+
 
 class LoginSchema(BaseModel):
-    email: str
-    password: str
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=1)
 
-def login_handler(login_data: LoginSchema):
-    email = login_data.email
-    password = login_data.password
 
-    user = UserModel.find_by_email(email)
-    
+def login_handler(login_data: LoginSchema) -> dict:
+    user = verify_user_login(login_data.email, login_data.password)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
-        )
-    
-    hashed_input_password = hashlib.sha256(password.encode('utf-8')).hexdigest()
-    
-    if hashed_input_password != user['password']:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
-        )
-        
+        raise ValueError("Invalid email or password")
     return {
         "message": "Login successful",
-        "user": {
-            "id": user['id'],
-            "email": user['email'],
-            "role": user['role'] 
-        }
+        "user": user,
     }
+
+
+def register_handler(email: str, password: str, role: str = "staff") -> bool:
+    return register_user(email, password, role)
