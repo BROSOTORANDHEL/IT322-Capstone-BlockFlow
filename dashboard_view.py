@@ -3,141 +3,165 @@ import os
 import json
 import urllib.request
 import urllib.error
-import requests  # Clean fallback or API access
-from datetime import datetime
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
+import requests
+from datetime import date, datetime, timedelta
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QPropertyAnimation, QEasingCurve, QTimer
+from PyQt6.QtGui import QFont, QColor, QPainter, QPixmap
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
-    QLabel, QPushButton, QFrame, QGridLayout, QScrollArea,
-    QDialog, QTableWidget, QTableWidgetItem, QHeaderView
+    QApplication, QWidget, QHBoxLayout, QVBoxLayout,
+    QLabel, QPushButton, QFrame, QGridLayout, QScrollArea, QComboBox,
+    QDialog, QTableWidget, QTableWidgetItem, QHeaderView,
+    QGraphicsOpacityEffect
 )
+from database import HOLLOWBLOCKS_ITEM_NAME, LOW_STOCK_ALERT_THRESHOLD
+
 
 # =================================================================
-# 🔎 DETAILED MONTHLY TRANSACTIONS MODAL
+# DETAILED MONTHLY TRANSACTIONS MODAL
 # =================================================================
 class MonthlyDetailsDialog(QDialog):
-    """
-    Sleek overlay popup displaying a clear table of all individual 
-    sales, stock inputs, and expenses for the selected month.
-    """
     def __init__(self, month_name, transactions, parent=None):
         super().__init__(parent)
         self.month_name = month_name
         self.transactions = transactions
-        self.setWindowTitle(f"Detailed Transactions - {self.month_name}")
-        self.setMinimumSize(700, 500)
+        self.setWindowTitle(f"Detailed Transactions — {self.month_name}")
+        self.setMinimumSize(720, 520)
         self.init_ui()
 
     def init_ui(self):
-        # Frameless, modern styling that blends with the dark glass dashboard
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setStyleSheet("""
             QDialog {
-                background-color: #0F172A;
-                border: 2px solid #334155;
-                border-radius: 12px;
+                background-color: #0B1120;
+                border: 1px solid rgba(255,255,255,20);
+                border-radius: 16px;
             }
-            QLabel {
-                color: #F8FAFC;
-            }
+            QLabel { color: #F8FAFC; }
             QTableWidget {
-                background-color: #1E293B;
-                gridline-color: #334155;
-                color: #F8FAFC;
-                border: 1px solid #334155;
-                border-radius: 8px;
+                background-color: #111827;
+                gridline-color: rgba(255,255,255,8);
+                color: #E2E8F0;
+                border: none;
+                border-radius: 10px;
+                font-size: 13px;
             }
+            QTableWidget::item { padding: 6px 12px; border: none; }
+            QTableWidget::item:selected { background-color: rgba(59,130,246,0.15); }
             QHeaderView::section {
-                background-color: #1E293B;
-                color: #94A3B8;
-                padding: 10px;
+                background-color: #0B1120;
+                color: #AAB8CA;
+                padding: 12px;
                 font-weight: bold;
-                border-bottom: 2px solid #334155;
-                border-top: none;
-                border-left: none;
-                border-right: none;
+                font-size: 11px;
+                letter-spacing: 1px;
+                border: none;
+                border-bottom: 1px solid rgba(255,255,255,10);
             }
+            QScrollBar:vertical { background: transparent; width: 6px; }
+            QScrollBar::handle:vertical { background: rgba(255,255,255,20); border-radius: 3px; }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(15)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Header layout with Title and X button
+        top_bar = QFrame()
+        top_bar.setFixedHeight(3)
+        top_bar.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #3B82F6, stop:0.5 #8B5CF6, stop:1 #10B981);
+            border-top-left-radius: 16px;
+            border-top-right-radius: 16px;
+        """)
+        layout.addWidget(top_bar)
+
+        inner = QWidget()
+        inner_layout = QVBoxLayout(inner)
+        inner_layout.setContentsMargins(28, 24, 28, 24)
+        inner_layout.setSpacing(16)
+
         header_layout = QHBoxLayout()
-        title_label = QLabel(f"Transactions for {self.month_name}")
-        title_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        
+        title_col = QVBoxLayout()
+        title_col.setSpacing(3)
+        title_label = QLabel(f"Transactions — {self.month_name}")
+        title_label.setFont(QFont("Segoe UI", 17, QFont.Weight.Bold))
+        title_label.setStyleSheet("color: #F8FAFC;")
+        count_label = QLabel(f"{len(self.transactions)} total record(s)")
+        count_label.setStyleSheet("color: #AAB8CA; font-size: 12px;")
+        title_col.addWidget(title_label)
+        title_col.addWidget(count_label)
+
         btn_close = QPushButton("✕")
-        btn_close.setFixedSize(30, 30)
+        btn_close.setFixedSize(32, 32)
         btn_close.setStyleSheet("""
             QPushButton {
-                background-color: transparent; 
-                color: #94A3B8; 
-                border: none; 
-                font-size: 16px; 
-                font-weight: bold;
+                background-color: rgba(255,255,255,8);
+                color: #94A3B8; border: none;
+                border-radius: 8px; font-size: 14px; font-weight: bold;
             }
-            QPushButton:hover { color: #EF4444; }
+            QPushButton:hover { background-color: rgba(239,68,68,0.2); color: #F87171; }
         """)
         btn_close.clicked.connect(self.reject)
-        
-        header_layout.addWidget(title_label)
+
+        header_layout.addLayout(title_col)
         header_layout.addStretch()
         header_layout.addWidget(btn_close)
-        layout.addLayout(header_layout)
+        inner_layout.addLayout(header_layout)
 
-        # Summary Metrics Row inside Modal
-        summary_label = QLabel(f"Showing {len(self.transactions)} total record(s)")
-        summary_label.setStyleSheet("color: #64748B; font-size: 12px; font-style: italic;")
-        layout.addWidget(summary_label)
-
-        # Table setup
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["DATE", "TYPE", "TRANSACTION DETAILS", "AMOUNT"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setDefaultAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setStyleSheet(self.table.styleSheet() + """
+            QTableWidget { alternate-background-color: rgba(255,255,255,3); }
+        """)
         self.populate_table()
-        layout.addWidget(self.table)
+        inner_layout.addWidget(self.table)
+        layout.addWidget(inner)
 
     def populate_table(self):
         self.table.setRowCount(len(self.transactions))
-        
+        self.table.verticalHeader().setDefaultSectionSize(46)
+
         for row_idx, tx in enumerate(self.transactions):
-            # 1. Date column
             date_item = QTableWidgetItem(tx.get("date", "N/A"))
-            date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            date_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row_idx, 0, date_item)
-            
-            # 2. Type Column
-            tx_type = str(tx.get("type", "Unknown")).upper()
-            type_item = QTableWidgetItem(tx_type)
-            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            tx_type = str(tx.get("type", "Unknown")).lower()
+            type_item = QTableWidgetItem(tx_type.upper())
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row_idx, 1, type_item)
-            
-            # 3. Description Column
-            desc_item = QTableWidgetItem(tx.get("description", "Unspecified Detail"))
+
+            desc_item = QTableWidgetItem(tx.get("description", ""))
+            desc_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row_idx, 2, desc_item)
-            
-            # 4. Colored amount column based on expense vs income
+
             amount = float(tx.get("amount", 0.0))
-            is_expense = tx.get("type", "").lower() in ["expense", "inventory"] or amount < 0
-            
-            if is_expense:
-                amt_str = f"-₱{abs(amount):,.2f}"
+            if tx_type == "inventory":
+                amt_str = f"₱{abs(amount):,.2f}"
                 amt_item = QTableWidgetItem(amt_str)
-                amt_item.setForeground(QColor("#EF4444"))  # Vivid Red
+                amt_item.setForeground(QColor("#3B82F6"))
+                type_item.setForeground(QColor("#3B82F6"))
+            elif tx_type == "expense" or amount < 0:
+                amt_str = f"−₱{abs(amount):,.2f}"
+                amt_item = QTableWidgetItem(amt_str)
+                amt_item.setForeground(QColor("#F87171"))
+                type_item.setForeground(QColor("#F87171"))
             else:
                 amt_str = f"+₱{amount:,.2f}"
                 amt_item = QTableWidgetItem(amt_str)
-                amt_item.setForeground(QColor("#10B981"))  # Emerald Green
-                
-            amt_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+                amt_item.setForeground(QColor("#34D399"))
+                type_item.setForeground(QColor("#34D399"))
+
+            amt_item.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
             amt_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row_idx, 3, amt_item)
 
@@ -147,25 +171,43 @@ class MonthlyDetailsDialog(QDialog):
 
 
 # =================================================================
-# 🌐 API FETCH WORKER (Safely Sandboxed to Prevent UI Crashes)
+# BACKGROUND API FETCH WORKER
 # =================================================================
+# Dashboard reads from the canonical transaction history.  The inventory
+# screen already uses BLOCKFLOW_API_URL with the /api suffix, while the old
+# dashboard hardcoded a different URL.  Accept either form so both windows
+# always talk to the same backend.
+def _dashboard_api_root(api_base_url=None):
+    configured = (
+        api_base_url
+        or os.environ.get("BLOCKFLOW_API_URL", "http://127.0.0.1:8000/api")
+    ).rstrip("/")
+    return configured[:-4] if configured.endswith("/api") else configured
+
+
 class DashboardDataWorker(QThread):
-    """
-    Background worker that fetches from BOTH /api/history and /api/sales,
-    merges them chronologically, and calculates live dashboard statistics.
-    """
     data_loaded = pyqtSignal(dict)
 
-    def __init__(self, api_base_url="http://127.0.0.1:8000"):
+    def __init__(self, api_base_url=None):
         super().__init__()
-        self.api_base_url = api_base_url
+        self.api_base_url = _dashboard_api_root(api_base_url)
 
     def run(self):
         result = {
             "current_stock_pcs": 0,
+            "stock_by_size": {
+                "All Sizes": 0,
+                "L": 0,
+                "XL": 0,
+            },
             "monthly_sales": 0,
             "monthly_expenses": 0,
             "monthly_net_profit": 0,
+            "period_totals": {
+                "daily": {"sales": 0, "expenses": 0, "net_profit": 0},
+                "weekly": {"sales": 0, "expenses": 0, "net_profit": 0},
+                "monthly": {"sales": 0, "expenses": 0, "net_profit": 0},
+            },
             "low_stock_alerts": [],
             "recent_transactions": [],
             "monthly_history": []
@@ -173,705 +215,963 @@ class DashboardDataWorker(QThread):
 
         raw_transactions = []
 
-        # 1. Fetch sales logs safely from /api/sales
+        # `transactions` is the single source of truth: every successful
+        # sales, stock, and expense write creates one row there.  Reading
+        # /sales and /history and trying to merge both responses caused sales
+        # to be duplicated and made dashboard behavior depend on response
+        # shape.
+        history_loaded = False
         try:
-            req = urllib.request.Request(f"{self.api_base_url}/api/sales", method="GET")
+            req = urllib.request.Request(
+                f"{self.api_base_url}/api/history",
+                headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+                method="GET",
+            )
             with urllib.request.urlopen(req, timeout=3) as response:
                 if response.status == 200:
-                    raw_res = json.loads(response.read().decode('utf-8'))
-                    sales_data = raw_res
-                    if isinstance(raw_res, dict):
-                        sales_data = raw_res.get("sales") or raw_res.get("data") or raw_res.get("history") or []
-                    
-                    if isinstance(sales_data, list):
-                        for sale in sales_data:
-                            qty = float(sale.get("quantity", 0))
-                            block_str = sale.get("block_size", "")
-                            
-                            price = 7.0
-                            if "7" in block_str:
-                                price = 7.0
-                            elif "6" in block_str:
-                                price = 6.0
-                            elif "5" in block_str:
-                                price = 5.0
-
-                            amount = sale.get("amount") or (qty * price)
-                            
-                            raw_transactions.append({
-                                "type": "sale",
-                                "description": f"{sale.get('customer_name', 'Walk-in')} - {int(qty)} pcs ({sale.get('block_size', 'Blocks')})",
-                                "amount": amount,
-                                "date": sale.get("sale_date", "2026-07-02"),
-                                "timestamp": sale.get("sale_date", "2026-07-02")
-                            })
-        except Exception as e:
-            print(f"[API Log] Safe bypass: /api/sales offline or unreadable ({e})")
-
-        # 2. Fetch general transaction logs safely from /api/history
-        try:
-            req = urllib.request.Request(f"{self.api_base_url}/api/history", method="GET")
-            with urllib.request.urlopen(req, timeout=3) as response:
-                if response.status == 200:
+                    history_loaded = True
                     raw_res = json.loads(response.read().decode('utf-8'))
                     history_data = raw_res
                     if isinstance(raw_res, dict):
-                        history_data = raw_res.get("history") or raw_res.get("data") or []
-                        
+                        history_data = (
+                            raw_res.get("history")
+                            or raw_res.get("data")
+                            or raw_res.get("transactions")
+                            or []
+                        )
                     if isinstance(history_data, list):
                         for item in history_data:
-                            db_title = item.get("title") or item.get("description") or "Generic Transaction"
-                            
-                            if item.get("type", "").lower() == "sale" and any(tx["description"] == db_title for tx in raw_transactions):
-                                continue
-                            
+                            try:
+                                amount = float(item.get("amount", 0) or 0)
+                            except (TypeError, ValueError):
+                                amount = 0.0
+                            date_value = (
+                                item.get("date")
+                                or item.get("date_record")
+                                or item.get("date_recorded")
+                                or item.get("date_added")
+                                or "1970-01-01"
+                            )
                             raw_transactions.append({
-                                "type": item.get("type", "expense"),
-                                "description": db_title,
-                                "amount": float(item.get("amount", 0)),
-                                "date": item.get("date", "2026-07-02"),
-                                "timestamp": item.get("date", "2026-07-02")
+                                "id": item.get("id"),
+                                "type": str(item.get("type", "expense")).lower(),
+                                "description": (
+                                    item.get("title")
+                                    or item.get("description")
+                                    or "Transaction"
+                                ),
+                                "amount": amount,
+                                "date": str(date_value),
+                                "timestamp": str(date_value),
                             })
         except Exception as e:
-            print(f"[API Log] Safe bypass: /api/history offline or unreadable ({e})")
+            print(f"[API] /api/history offline ({e})")
 
-        # 3. Sort merged list chronologically
-        def parse_date(date_str):
+        # Staff and Admin run as separate desktop processes but share this
+        # SQLite database. Prefer that local source when it has data so the
+        # dashboard sees a Staff write immediately, even if the API process
+        # still has an older database connection or points at another copy.
+        # Keep the API response as a fallback for remote deployments.
+        try:
+            from database import get_transaction_history
+
+            local_history = get_transaction_history()
+            if local_history:
+                raw_transactions = []
+                for item in local_history:
+                    try:
+                        amount = float(item.get("amount", 0) or 0)
+                    except (TypeError, ValueError):
+                        amount = 0.0
+                    date_value = (
+                        item.get("date")
+                        or item.get("date_record")
+                        or "1970-01-01"
+                    )
+                    raw_transactions.append({
+                        "id": item.get("id"),
+                        "type": str(item.get("type", "expense")).lower(),
+                        "description": (
+                            item.get("title")
+                            or item.get("description")
+                            or "Transaction"
+                        ),
+                        "amount": amount,
+                        "date": str(date_value),
+                        "timestamp": str(date_value),
+                    })
+        except Exception as e:
+            if not history_loaded or not raw_transactions:
+                print(f"[DB] Local transaction fallback unavailable ({e})")
+
+        def parse_id(transaction):
             try:
-                return datetime.strptime(date_str[:10], "%Y-%m-%d")
+                return int(transaction.get("id") or 0)
             except Exception:
-                return datetime.min
+                return 0
 
-        raw_transactions.sort(key=lambda x: parse_date(x["date"]), reverse=True)
+        # "Recent" means when the record was saved, not the business date
+        # selected in the form.  A Staff member may enter an older sale date,
+        # but that record should still appear at the top of Admin's activity.
+        raw_transactions.sort(key=parse_id, reverse=True)
         result["recent_transactions"] = raw_transactions
 
-        # 4. Process calculations dynamically
         total_sales = 0
         total_expenses = 0
+        today = date.today()
+        week_start = today - timedelta(days=today.weekday())
+        month_start = today.replace(day=1)
+        period_totals = {
+            "daily": {"sales": 0.0, "expenses": 0.0, "net_profit": 0.0},
+            "weekly": {"sales": 0.0, "expenses": 0.0, "net_profit": 0.0},
+            "monthly": {"sales": 0.0, "expenses": 0.0, "net_profit": 0.0},
+        }
         monthly_map = {}
 
         for txn in raw_transactions:
-            amt = txn["amount"]
-            is_expense = txn["type"].lower() == "expense" or amt < 0
-            
+            amt = float(txn.get("amount", 0) or 0)
+            tx_type = txn["type"].lower()
+            is_expense = tx_type == "expense" or (tx_type != "inventory" and amt < 0)
+
             if is_expense:
                 total_expenses += abs(amt)
-            else:
+            elif tx_type == "sale":
                 total_sales += amt
 
-            raw_date = txn["date"]
-            year_month = raw_date[:7] if len(raw_date) >= 7 else "2026-07"
-            
-            if year_month not in monthly_map:
-                monthly_map[year_month] = {"sales": 0, "expenses": 0, "tx_count": 0}
-            
-            monthly_map[year_month]["tx_count"] += 1
+            raw_date = str(txn.get("date", "1970-01-01"))
+            try:
+                month_key = raw_date[:7]
+                dt = datetime.strptime(raw_date[:10], "%Y-%m-%d")
+                month_label = dt.strftime("%B %Y")
+
+                for period_name, period_start in (
+                    ("daily", today),
+                    ("weekly", week_start),
+                    ("monthly", month_start),
+                ):
+                    if period_start <= dt.date() <= today:
+                        if is_expense:
+                            period_totals[period_name]["expenses"] += abs(amt)
+                        elif tx_type == "sale":
+                            period_totals[period_name]["sales"] += amt
+            except Exception:
+                month_key = "unknown"
+                month_label = "Unknown"
+
+            if month_key not in monthly_map:
+                monthly_map[month_key] = {"label": month_label, "sales": 0, "expenses": 0, "tx_count": 0}
+            monthly_map[month_key]["tx_count"] += 1
             if is_expense:
-                monthly_map[year_month]["expenses"] += abs(amt)
-            else:
-                monthly_map[year_month]["sales"] += amt
+                monthly_map[month_key]["expenses"] += abs(amt)
+            elif tx_type == "sale":
+                monthly_map[month_key]["sales"] += amt
 
         result["monthly_sales"] = total_sales
         result["monthly_expenses"] = total_expenses
         result["monthly_net_profit"] = total_sales - total_expenses
+        for totals in period_totals.values():
+            totals["net_profit"] = totals["sales"] - totals["expenses"]
+        result["period_totals"] = period_totals
 
-        # 5. Format monthly map for display
         months_formatted = []
-        month_names = {
-            "01": "January", "02": "February", "03": "March", "04": "April",
-            "05": "May", "06": "June", "07": "July", "08": "August",
-            "09": "September", "10": "October", "11": "November", "12": "December"
-        }
-        for ym, stats in sorted(monthly_map.items(), reverse=True):
-            parts = ym.split("-")
-            name = f"{month_names.get(parts[1], parts[1])} {parts[0]}" if len(parts) == 2 else ym
+        for key in sorted(monthly_map.keys(), reverse=True):
+            stats = monthly_map[key]
+            name = stats["label"]
             net = stats["sales"] - stats["expenses"]
-            
             months_formatted.append({
                 "month": name,
                 "tx_count": f"{stats['tx_count']} txns",
                 "sales": f"₱{stats['sales']:,}",
                 "expenses": f"₱{stats['expenses']:,}",
-                "net": f"₱{net:,}" if net >= 0 else f"-₱{abs(net):,}",
+                "net": f"₱{net:,}" if net >= 0 else f"−₱{abs(net):,}",
                 "net_val": net
             })
         result["monthly_history"] = months_formatted
 
-        # 6. Fetch inventory safely
+        inventory_loaded = False
+        inventory_data = []
         try:
             req = urllib.request.Request(f"{self.api_base_url}/api/inventory", method="GET")
             with urllib.request.urlopen(req, timeout=3) as response:
                 if response.status == 200:
+                    inventory_loaded = True
                     raw_res = json.loads(response.read().decode('utf-8'))
                     inventory_data = raw_res
                     if isinstance(raw_res, dict):
                         inventory_data = raw_res.get("inventory") or raw_res.get("data") or []
-                    
-                    total_stock = 0
-                    low_alerts = []
-                    for item in inventory_data:
-                        qty = int(item.get("quantity", 0))
-                        total_stock += qty
-                        threshold = int(item.get("low_stock_threshold", 100))
-                        if qty <= threshold:
-                            low_alerts.append(f"{item.get('name', 'Product')} is running low! ({qty} left)")
-                    result["current_stock_pcs"] = total_stock
-                    result["low_stock_alerts"] = low_alerts
         except Exception as e:
-            print(f"[API Log] Safe bypass: Inventory status offline ({e})")
+            print(f"[API] Inventory offline ({e})")
+
+        try:
+            from database import get_all_inventory
+
+            local_inventory = get_all_inventory()
+            if local_inventory:
+                inventory_data = local_inventory
+        except Exception as e:
+            if not inventory_loaded or not inventory_data:
+                print(f"[DB] Local inventory fallback unavailable ({e})")
+
+        total_stock = 0
+        stock_by_size = {"All Sizes": 0, "L": 0, "XL": 0}
+        for item in inventory_data:
+            try:
+                qty = int(item.get("quantity", 0) or 0)
+            except (TypeError, ValueError):
+                qty = 0
+            # The metric is explicitly in pieces.  Include every current pcs
+            # record so a newly recorded stock item is reflected even when
+            # its name is not exactly "Hollowblocks".
+            if str(item.get("unit", "pcs")).strip().lower() != "pcs":
+                continue
+            total_stock += qty
+            stock_by_size["All Sizes"] += qty
+            normalized_size = str(item.get("size", "") or "").strip().upper()
+            if normalized_size in {"L", "XL"}:
+                stock_by_size[normalized_size] += qty
+        # Low stock is based on the combined Hollowblocks inventory, not on
+        # whichever individual restock record happened to be smallest.
+        low_alerts = []
+        if inventory_data and total_stock <= LOW_STOCK_ALERT_THRESHOLD:
+            low_alerts.append(
+                f"{HOLLOWBLOCKS_ITEM_NAME} is running low! ({total_stock:,} pcs left)"
+            )
+        result["current_stock_pcs"] = total_stock
+        result["stock_by_size"] = stock_by_size
+        result["low_stock_alerts"] = low_alerts
 
         self.data_loaded.emit(result)
 
 
 # =================================================================
-# 🖼️ MAIN VIEW PORT
+# MAIN DASHBOARD WINDOW  (improved — top nav bar, no sidebar)
 # =================================================================
 class BlockFlowDashboard(QFrame):
-    def __init__(self):
+    def __init__(self, role="owner"):
         super().__init__()
-        self.setWindowTitle("BlockFlow - Dashboard Overview")
+        self.setFont(QFont("Segoe UI", 10))
+        self.user_role = str(role or "staff").strip().lower()
+        self.is_admin = self.user_role in {"owner", "admin"}
+        self.setWindowTitle("BlockFlow — Dashboard")
         self.setObjectName("MainWindow")
-        
+
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        image_path = os.path.join(current_dir, "image_b08741.png")
-        clean_image_path = image_path.replace("\\", "/")
-        
-        self.setStyleSheet(f"""
-            QFrame#MainWindow {{
-                border-image: url("{clean_image_path}") 0 0 0 0 stretch stretch;
-            }}
-        """)
-        
-        # Store full raw transaction lists locally for filtering dialog launches
+        self.image_path = os.path.join(current_dir, "image_b08741.png")
+        if not os.path.exists(self.image_path):
+            self.image_path = os.path.join(current_dir, "image_b08741.jpg")
+
         self.all_raw_tx_records = []
-        
+        self.latest_dashboard_data = {}
+        self.metric_filters = {}
+        self.metric_titles = {}
+        self.metric_subtitles = {}
         self.init_ui()
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.setInterval(5000)
+        self.refresh_timer.timeout.connect(self.load_live_data)
+        self.refresh_timer.start()
         self.load_live_data()
+        self.setWindowOpacity(0.0)
         self.showFullScreen()
+        self._anim = QPropertyAnimation(self, b"windowOpacity")
+        self._anim.setDuration(500)
+        self._anim.setStartValue(0.0)
+        self._anim.setEndValue(1.0)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._anim.start()
 
+    # ── Background painting ──────────────────────────────────────────────────
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#080D1A"))
+        pixmap = QPixmap(self.image_path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
+            # 5% more transparent than original (195 → 182)
+            painter.fillRect(self.rect(), QColor(5, 10, 25, 182))
+        painter.end()
+
+    # ── Nav button helper ────────────────────────────────────────────────────
+    def _nav_button(self, text, active=False):
+        btn = QPushButton(text)
+        btn.setFixedHeight(36)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        if active:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(59,130,246,0.15);
+                    color: #93C5FD; border: none;
+                    border-radius: 8px; padding: 0 18px;
+                    font-size: 13px; font-weight: 700;
+                }
+            """)
+        else:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent; color: #94A3B8;
+                    border: none; border-radius: 8px;
+                    padding: 0 18px; font-size: 13px; font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: rgba(255,255,255,6); color: #CBD5E1;
+                }
+            """)
+        return btn
+
+    # ─────────────────────────────────────────────────────────────────────────
     def init_ui(self):
-        master_layout = QHBoxLayout(self)
-        master_layout.setContentsMargins(0, 0, 0, 0)
-        master_layout.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # 🔲 SIDEBAR PANEL (LEFT)
-        sidebar = QFrame()
-        sidebar.setFixedWidth(240)
-        sidebar.setStyleSheet("""
-            QFrame {
-                background-color: rgba(30, 41, 59, 0.90);
-                border-right: 1px solid rgba(51, 65, 85, 0.3);
+        # ══════════════════════════════════════════════════════════════
+        # TOP NAV BAR
+        # ══════════════════════════════════════════════════════════════
+        nav_bar = QFrame()
+        nav_bar.setFixedHeight(64)
+        nav_bar.setObjectName("NavBar")
+        nav_bar.setStyleSheet("""
+            QFrame#NavBar {
+                background-color: rgba(6, 10, 22, 230);
+                border-bottom: 1px solid rgba(255,255,255,8);
             }
-            QLabel { color: #F8FAFC; border: none; background: transparent; }
-            QPushButton {
-                background-color: transparent; color: #94A3B8;
-                border: none; border-radius: 8px;
-                padding: 12px 16px; font-size: 14px; text-align: left;
-                font-weight: 500;
-            }
-            QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); color: #F8FAFC; }
         """)
-        
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(20, 40, 20, 40)
-        sidebar_layout.setSpacing(12)
+        nav_layout = QHBoxLayout(nav_bar)
+        nav_layout.setContentsMargins(28, 0, 28, 0)
+        nav_layout.setSpacing(0)
 
+        brand_badge = QLabel("BF")
+        brand_badge.setFixedSize(34, 34)
+        brand_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_badge.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        brand_badge.setStyleSheet("""
+            color: white;
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                stop:0 #3B82F6, stop:1 #8B5CF6);
+            border-radius: 9px;
+        """)
         brand_label = QLabel("BlockFlow")
-        brand_label.setFont(QFont("Arial", 22, QFont.Weight.Bold))
-        sidebar_layout.addWidget(brand_label)
-        
-        sub_brand = QLabel("Magalin Trading")
-        sub_brand.setStyleSheet("color: #64748B; font-size: 12px; margin-bottom: 25px; border: none; background: transparent;")
-        sidebar_layout.addWidget(sub_brand)
+        brand_label.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        brand_label.setStyleSheet("color: #F1F5F9; padding-left: 10px; letter-spacing: 0.3px;")
 
-        btn_dash = QPushButton("📊  Dashboard")
-        btn_dash.setStyleSheet("""
+        nav_layout.addWidget(brand_badge)
+        nav_layout.addWidget(brand_label)
+        nav_layout.addSpacing(36)
+
+        sep = QFrame()
+        sep.setFixedSize(1, 28)
+        sep.setStyleSheet("background-color: rgba(255,255,255,10);")
+        nav_layout.addWidget(sep)
+        nav_layout.addSpacing(28)
+
+        btn_nav_dash = self._nav_button("Dashboard", True)   # active
+        btn_nav_inv  = self._nav_button("Inventory", False)
+        btn_nav_inv.clicked.connect(self.handle_nav_inventory)
+
+        nav_layout.addWidget(btn_nav_dash)
+        nav_layout.addSpacing(4)
+        nav_layout.addWidget(btn_nav_inv)
+        if self.is_admin:
+            btn_nav_analytics = self._nav_button("Analytics", False)
+            btn_nav_analytics.clicked.connect(self.handle_nav_analytics)
+            nav_layout.addSpacing(4)
+            nav_layout.addWidget(btn_nav_analytics)
+        nav_layout.addStretch()
+
+        admin_badge = QLabel("👤  Admin" if self.is_admin else "👷  Staff")
+        admin_badge.setStyleSheet("""
+            color: #CBD5E1;
+            background-color: rgba(30,41,59,180);
+            padding: 7px 16px;
+            border-radius: 18px;
+            border: 1px solid rgba(255,255,255,10);
+            font-weight: 600;
+            font-size: 13px;
+        """)
+
+        btn_logout = QPushButton("Logout")
+        btn_logout.setFixedHeight(34)
+        btn_logout.setStyleSheet("""
             QPushButton {
-                background-color: rgba(51, 65, 85, 0.6); color: #F8FAFC;
-                border-left: 4px solid #3B82F6; border-radius: 4px;
-                font-weight: bold; padding-left: 12px;
+                color: #94A3B8;
+                background-color: rgba(30,41,59,160);
+                padding: 0 18px;
+                border-radius: 17px;
+                border: 1px solid rgba(255,255,255,10);
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: rgba(239,68,68,0.18);
+                border-color: rgba(239,68,68,0.35);
+                color: #F87171;
             }
         """)
-        btn_inv = QPushButton("📦  Inventory")
-        btn_analytics = QPushButton("📈  Analytics")
-        
-        sidebar_layout.addWidget(btn_dash)
-        sidebar_layout.addWidget(btn_inv)
-        sidebar_layout.addWidget(btn_analytics)
-        sidebar_layout.addStretch()
+        btn_logout.clicked.connect(self.handle_logout)
 
-        logout_btn = QPushButton("🚪  Logout")
-        logout_btn.setStyleSheet("""
-            QPushButton { color: #EF4444; font-weight: bold; border: none; }
-            QPushButton:hover { background-color: rgba(239, 68, 68, 0.15); color: #F87171; }
-        """)
-        logout_btn.clicked.connect(self.handle_logout)
-        sidebar_layout.addWidget(logout_btn)
+        nav_layout.addWidget(admin_badge)
+        nav_layout.addSpacing(10)
+        nav_layout.addWidget(btn_logout)
+        root.addWidget(nav_bar)
 
-        master_layout.addWidget(sidebar)
-
-        # 🖼️ MAIN WORKSPACE (RIGHT)
+        # ══════════════════════════════════════════════════════════════
+        # SCROLLABLE WORKSPACE
+        # ══════════════════════════════════════════════════════════════
         workspace_container = QScrollArea()
         workspace_container.setWidgetResizable(True)
         workspace_container.setFrameShape(QFrame.Shape.NoFrame)
-        workspace_container.setStyleSheet("background: transparent;")
+        workspace_container.setStyleSheet("""
+            QScrollArea { background: transparent; }
+            QScrollBar:vertical { background: transparent; width: 6px; }
+            QScrollBar::handle:vertical { background: rgba(255,255,255,15); border-radius: 3px; }
+        """)
 
         workspace_widget = QWidget()
         workspace_widget.setObjectName("Workspace")
         workspace_widget.setStyleSheet("""
-            QWidget#Workspace {
-                background-color: rgba(15, 23, 42, 0.82);
-            }
+            QWidget#Workspace { background: transparent; }
             QLabel { background: transparent; border: none; }
         """)
-        
+
         workspace_layout = QVBoxLayout(workspace_widget)
-        workspace_layout.setContentsMargins(40, 30, 40, 30)
-        workspace_layout.setSpacing(25)
+        workspace_layout.setContentsMargins(28, 22, 28, 22)
+        workspace_layout.setSpacing(16)
 
-        # Row 1: Workspace Top Navigation & Profile Bar
-        top_nav_layout = QHBoxLayout()
-        
-        title_block = QVBoxLayout()
+        # ── Page title ────────────────────────────────────────────────
+        title_row = QHBoxLayout()
+        title_col = QVBoxLayout()
+        title_col.setSpacing(4)
         header_title = QLabel("Dashboard Overview")
-        header_title.setFont(QFont("Arial", 26, QFont.Weight.Bold))
-        header_title.setStyleSheet("color: #F8FAFC; border: none;")
-        sub_title = QLabel("Track your business performance")
-        sub_title.setStyleSheet("color: #94A3B8; font-size: 13px; border: none;")
-        title_block.addWidget(header_title)
-        title_block.addWidget(sub_title)
-        
-        top_nav_layout.addLayout(title_block)
-        top_nav_layout.addStretch()
-        
-        profile_container = QFrame()
-        profile_container.setStyleSheet("background: transparent; border: none;")
-        profile_layout = QHBoxLayout(profile_container)
-        profile_layout.setContentsMargins(0, 0, 0, 0)
-        profile_layout.setSpacing(10)
-        
-        admin_badge = QLabel("A  Admin")
-        admin_badge.setStyleSheet("""
-            color: #F8FAFC; background-color: rgba(30, 41, 59, 0.8); 
-            padding: 8px 16px; border-radius: 18px; 
-            border: 1px solid rgba(255, 255, 255, 0.1); font-weight: 500;
-        """)
-        
-        top_logout_btn = QPushButton("↪ Logout")
-        top_logout_btn.setStyleSheet("""
-            QPushButton {
-                color: #F8FAFC; background-color: rgba(30, 41, 59, 0.8); 
-                padding: 8px 16px; border-radius: 18px; 
-                border: 1px solid rgba(255, 255, 255, 0.1); font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: rgba(239, 68, 68, 0.2);
-                border-color: rgba(239, 68, 68, 0.4);
-            }
-        """)
-        top_logout_btn.clicked.connect(self.handle_logout)
-        
-        profile_layout.addWidget(admin_badge)
-        profile_layout.addWidget(top_logout_btn)
-        top_nav_layout.addWidget(profile_container)
-        
-        workspace_layout.addLayout(top_nav_layout)
+        header_title.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
+        header_title.setStyleSheet("color: #F8FAFC;")
+        sub_title = QLabel("Live business performance — Magalin Hollow Blocks Trading")
+        sub_title.setStyleSheet("color: #B8C5D6; font-size: 13px;")
+        title_col.addWidget(header_title)
+        title_col.addWidget(sub_title)
+        title_row.addLayout(title_col)
+        title_row.addStretch()
+        workspace_layout.addLayout(title_row)
 
-        # Row 2: KPI Metrics Cards
+        # ── KPI Cards ─────────────────────────────────────────────────
+        # 5% more transparent panels: 210 → 197
+        PANEL_BG = "rgba(10, 17, 34, 225)"
+
         metrics_grid = QGridLayout()
-        metrics_grid.setSpacing(20)
+        metrics_grid.setSpacing(12)
 
         self.metric_values = {}
-        
+
         metrics_setup = [
-            ("current_stock", "Current Stock", "📦", "rgba(59, 130, 246, 0.2)", "#3B82F6", "Finished goods total", "All ∨"),
-            ("monthly_sales", "Monthly Sales", "📈", "rgba(16, 185, 129, 0.2)", "#10B981", "Goal Progress <span style='color:#10B981;'>100%</span>", "monthly ∨"),
-            ("monthly_expenses", "Monthly Expenses", "⚡", "rgba(249, 115, 22, 0.2)", "#F97316", "Total monthly costs", "monthly ∨"),
-            ("monthly_net_profit", "Monthly Net Profit", "₱", "rgba(139, 92, 246, 0.2)", "#8B5CF6", "Sales minus expenses", "monthly ∨"),
+            ("current_stock",     "Current Stock",    "📦",
+             "rgba(59,130,246,0.18)",  "#3B82F6", "Finished goods total",
+             [("All Sizes", "All Sizes"), ("L (Large)", "L"), ("XL (Extra Large)", "XL")]),
+            ("monthly_sales",     "Monthly Sales",    "💰",
+             "rgba(16,185,129,0.18)",  "#10B981", "Total revenue this month",
+             [("Daily", "daily"), ("Weekly", "weekly"), ("Monthly", "monthly")]),
+            ("monthly_expenses",  "Monthly Expenses", "📋",
+             "rgba(249,115,22,0.18)",  "#F97316", "Total costs this month",
+             [("Daily", "daily"), ("Weekly", "weekly"), ("Monthly", "monthly")]),
+            ("monthly_net_profit","Net Profit",       "📈",
+             "rgba(139,92,246,0.18)",  "#8B5CF6", "Sales minus expenses",
+             [("Daily", "daily"), ("Weekly", "weekly"), ("Monthly", "monthly")]),
         ]
 
-        for i, (key, title, icon, bg, color, sub, flt) in enumerate(metrics_setup):
+        for i, (key, title, icon, bg, color, sub, filter_options) in enumerate(metrics_setup):
             box = QFrame()
             box.setObjectName("MetricBox")
-            box.setStyleSheet("""
-                QFrame#MetricBox {
-                    background-color: rgba(30, 41, 59, 0.65);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 12px;
-                }
+            box.setStyleSheet(f"""
+                QFrame#MetricBox {{
+                    background-color: {PANEL_BG};
+                    border: 1px solid rgba(255,255,255,9);
+                    border-top: 3px solid {color};
+                    border-radius: 14px;
+                }}
             """)
-            box_layout = QVBoxLayout(box)
-            box_layout.setContentsMargins(20, 20, 20, 20)
-            box_layout.setSpacing(12)
-            
-            card_header = QHBoxLayout()
-            icon_lbl = QLabel(icon)
-            icon_lbl.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-            icon_lbl.setFixedSize(36, 36)
-            icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon_lbl.setStyleSheet(f"background-color: {bg}; color: {color}; border-radius: 8px;")
-            
-            filter_btn = QPushButton(flt)
-            filter_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent; color: #64748B; font-size: 11px;
-                    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 4px 8px;
-                }
-            """)
-            card_header.addWidget(icon_lbl)
-            card_header.addStretch()
-            card_header.addWidget(filter_btn)
-            box_layout.addLayout(card_header)
-            
-            lbl_title = QLabel(title)
-            lbl_title.setStyleSheet("color: #94A3B8; font-size: 13px;")
-            box_layout.addWidget(lbl_title)
 
-            val_lbl = QLabel("0")
-            val_lbl.setFont(QFont("Arial", 22, QFont.Weight.Bold))
-            val_lbl.setStyleSheet("color: #F8FAFC;")
+            box_layout = QVBoxLayout(box)
+            box_layout.setContentsMargins(18, 16, 18, 18)
+            box_layout.setSpacing(7)
+
+            icon_row = QHBoxLayout()
+            icon_badge = QLabel(icon)
+            icon_badge.setFixedSize(38, 38)
+            icon_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_badge.setFont(QFont("Segoe UI", 16))
+            icon_badge.setStyleSheet(f"background-color: {bg}; border-radius: 10px;")
+            icon_row.addWidget(icon_badge)
+            icon_row.addStretch()
+            filter_box = QComboBox()
+            filter_box.setObjectName("MetricFilter")
+            filter_box.setFixedHeight(30)
+            filter_box.setMinimumWidth(92 if key == "current_stock" else 86)
+            filter_box.setStyleSheet("""
+                QComboBox#MetricFilter {
+                    background-color: rgba(30, 41, 59, 210);
+                    color: #CBD5E1;
+                    border: 1px solid rgba(255,255,255,18);
+                    border-radius: 8px;
+                    padding: 0 8px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+                QComboBox#MetricFilter:hover {
+                    border: 1px solid rgba(96,165,250,150);
+                    color: #F8FAFC;
+                }
+                QComboBox#MetricFilter::drop-down {
+                    border: none;
+                    width: 18px;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #111827;
+                    color: #E2E8F0;
+                    border: 1px solid rgba(255,255,255,18);
+                    selection-background-color: #1E3A5F;
+                    padding: 4px;
+                }
+            """)
+            for option_label, option_value in filter_options:
+                filter_box.addItem(option_label, option_value)
+            filter_box.setCurrentIndex(len(filter_options) - 1 if key != "current_stock" else 0)
+            filter_box.currentIndexChanged.connect(
+                lambda _index, metric_key=key: self.on_metric_filter_changed(metric_key)
+            )
+            icon_row.addWidget(filter_box)
+            self.metric_filters[key] = filter_box
+            box_layout.addLayout(icon_row)
+
+            lbl_title = QLabel(title)
+            lbl_title.setStyleSheet(
+                "color: #C0CCDA; font-size: 12px; font-weight: 600; letter-spacing: 0.5px;")
+            box_layout.addWidget(lbl_title)
+            self.metric_titles[key] = lbl_title
+
+            val_lbl = QLabel("—")
+            val_lbl.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
+            val_lbl.setStyleSheet("color: #F1F5F9;")
             box_layout.addWidget(val_lbl)
             self.metric_values[key] = val_lbl
-            
+
             lbl_sub = QLabel(sub)
-            lbl_sub.setStyleSheet("color: #94A3B8; font-size: 12px;")
+            lbl_sub.setStyleSheet("color: #9EADBF; font-size: 11px;")
             box_layout.addWidget(lbl_sub)
-            
+            self.metric_subtitles[key] = lbl_sub
+
             metrics_grid.addWidget(box, 0, i)
 
         workspace_layout.addLayout(metrics_grid)
 
-        # 📅 TRANSACTION HISTORY PANEL (COLLAPSIBLE CALENDAR)
+        # ── Transaction History Panel ──────────────────────────────────
         self.history_panel = QFrame()
         self.history_panel.setObjectName("HistoryPanel")
-        self.history_panel.setStyleSheet("""
-            QFrame#HistoryPanel {
-                background-color: rgba(30, 41, 59, 0.65);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 12px;
-            }
+        self.history_panel.setStyleSheet(f"""
+            QFrame#HistoryPanel {{
+                background-color: {PANEL_BG};
+                border: 1px solid rgba(255,255,255,9);
+                border-radius: 14px;
+            }}
         """)
         self.history_layout = QVBoxLayout(self.history_panel)
-        self.history_layout.setContentsMargins(20, 20, 20, 20)
-        self.history_layout.setSpacing(15)
+        self.history_layout.setContentsMargins(18, 16, 18, 18)
+        self.history_layout.setSpacing(10)
 
-        header_bar_layout = QHBoxLayout()
-        icon_frame = QLabel("📅")
-        icon_frame.setFont(QFont("Arial", 14))
-        icon_frame.setFixedSize(36, 36)
-        icon_frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_frame.setStyleSheet("background-color: rgba(139, 92, 246, 0.2); color: #8B5CF6; border-radius: 8px;")
-        
-        text_label_layout = QVBoxLayout()
-        text_label_layout.setSpacing(2)
+        header_bar = QHBoxLayout()
+        left_header = QVBoxLayout()
+        left_header.setSpacing(3)
         title_text = QLabel("Transaction History")
-        title_text.setFont(QFont("Arial", 15, QFont.Weight.Bold))
-        title_text.setStyleSheet("color: #F8FAFC;")
-        sub_desc_text = QLabel("View monthly summaries")
-        sub_desc_text.setStyleSheet("color: #64748B; font-size: 11px;")
-        text_label_layout.addWidget(title_text)
-        text_label_layout.addWidget(sub_desc_text)
+        title_text.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        title_text.setStyleSheet("color: #F1F5F9;")
+        sub_desc_text = QLabel("Monthly summaries — click a card to view details")
+        sub_desc_text.setStyleSheet("color: #AAB8CA; font-size: 11px;")
+        left_header.addWidget(title_text)
+        left_header.addWidget(sub_desc_text)
 
         self.calendar_toggle_btn = QPushButton("View Calendar")
+        self.calendar_toggle_btn.setFixedHeight(36)
         self.calendar_toggle_btn.setStyleSheet("""
             QPushButton {
-                background-color: #8B5CF6; color: #FFFFFF; border: none;
-                border-radius: 8px; padding: 10px 18px; font-size: 13px; font-weight: bold;
+                background-color: rgba(139,92,246,0.15);
+                color: #A78BFA;
+                border: 1px solid rgba(139,92,246,0.3);
+                border-radius: 10px;
+                padding: 0 18px;
+                font-size: 13px;
+                font-weight: bold;
             }
-            QPushButton:hover { background-color: #7C3AED; }
+            QPushButton:hover {
+                background-color: rgba(139,92,246,0.25);
+                color: #C4B5FD;
+            }
         """)
         self.calendar_toggle_btn.clicked.connect(self.toggle_history_calendar)
 
-        header_bar_layout.addWidget(icon_frame)
-        header_bar_layout.addSpacing(10)
-        header_bar_layout.addLayout(text_label_layout)
-        header_bar_layout.addStretch()
-        header_bar_layout.addWidget(self.calendar_toggle_btn)
-        self.history_layout.addLayout(header_bar_layout)
+        header_bar.addLayout(left_header)
+        header_bar.addStretch()
+        header_bar.addWidget(self.calendar_toggle_btn)
+        self.history_layout.addLayout(header_bar)
 
-        # Calendar body panel
         self.monthly_grid_widget = QWidget()
         self.monthly_grid_widget.setVisible(False)
         self.monthly_grid_layout = QGridLayout(self.monthly_grid_widget)
-        self.monthly_grid_layout.setSpacing(15)
-        self.monthly_grid_layout.setContentsMargins(0, 10, 0, 0)
-        
+        self.monthly_grid_layout.setSpacing(14)
+        self.monthly_grid_layout.setContentsMargins(0, 8, 0, 0)
         self.history_layout.addWidget(self.monthly_grid_widget)
         workspace_layout.addWidget(self.history_panel)
 
-        # 📊 BOTTOM SPLIT PANELS
+        # ── Bottom panels ─────────────────────────────────────────────
         bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(25)
+        bottom_layout.setSpacing(12)
 
-        # --- LEFT PANEL: Low Stock Alerts ---
+        # Stock Alerts
         self.left_panel = QFrame()
         self.left_panel.setObjectName("LeftPanel")
-        self.left_panel.setStyleSheet("""
-            QFrame#LeftPanel {
-                background-color: rgba(30, 41, 59, 0.65); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;
-            }
+        self.left_panel.setStyleSheet(f"""
+            QFrame#LeftPanel {{
+                background-color: {PANEL_BG};
+                border: 1px solid rgba(255,255,255,9);
+                border-radius: 14px;
+            }}
         """)
         self.left_panel_layout = QVBoxLayout(self.left_panel)
-        self.left_panel_layout.setContentsMargins(24, 24, 24, 24)
-        self.left_panel_layout.setSpacing(15)
-        
-        left_title_layout = QHBoxLayout()
-        left_title = QLabel("Low Stock Alerts")
-        left_title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        left_title.setStyleSheet("color: #F8FAFC;")
-        left_title_layout.addWidget(left_title)
-        left_title_layout.addStretch()
-        self.left_panel_layout.addLayout(left_title_layout)
+        self.left_panel_layout.setContentsMargins(18, 16, 18, 18)
+        self.left_panel_layout.setSpacing(10)
+
+        left_header_row = QHBoxLayout()
+        left_header_col = QVBoxLayout()
+        left_header_col.setSpacing(3)
+        left_title = QLabel("Stock Alerts")
+        left_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        left_title.setStyleSheet("color: #F1F5F9;")
+        left_sub = QLabel("Items below threshold")
+        left_sub.setStyleSheet("color: #AAB8CA; font-size: 11px;")
+        left_header_col.addWidget(left_title)
+        left_header_col.addWidget(left_sub)
+        left_header_row.addLayout(left_header_col)
+        left_header_row.addStretch()
+        self.left_panel_layout.addLayout(left_header_row)
 
         self.alerts_container = QVBoxLayout()
+        self.alerts_container.setSpacing(8)
         self.left_panel_layout.addLayout(self.alerts_container)
         self.left_panel_layout.addStretch()
-        
-        # --- RIGHT PANEL: Recent Transactions ---
+
+        # Recent Transactions
         self.right_panel = QFrame()
         self.right_panel.setObjectName("RightPanel")
-        self.right_panel.setStyleSheet("""
-            QFrame#RightPanel {
-                background-color: rgba(30, 41, 59, 0.65); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;
-            }
+        self.right_panel.setStyleSheet(f"""
+            QFrame#RightPanel {{
+                background-color: {PANEL_BG};
+                border: 1px solid rgba(255,255,255,9);
+                border-radius: 14px;
+            }}
         """)
         self.right_panel_layout = QVBoxLayout(self.right_panel)
-        self.right_panel_layout.setContentsMargins(24, 24, 24, 24)
-        self.right_panel_layout.setSpacing(15)
-        
-        right_title_layout = QHBoxLayout()
+        self.right_panel_layout.setContentsMargins(18, 16, 18, 18)
+        self.right_panel_layout.setSpacing(10)
+
+        right_header_col = QVBoxLayout()
+        right_header_col.setSpacing(3)
         right_title = QLabel("Recent Transactions")
-        right_title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        right_title.setStyleSheet("color: #F8FAFC;")
-        right_title_layout.addWidget(right_title)
-        right_title_layout.addStretch()
-        self.right_panel_layout.addLayout(right_title_layout)
+        right_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        right_title.setStyleSheet("color: #F1F5F9;")
+        right_sub = QLabel("Latest 5 activity records")
+        right_sub.setStyleSheet("color: #AAB8CA; font-size: 11px;")
+        right_header_col.addWidget(right_title)
+        right_header_col.addWidget(right_sub)
+        self.right_panel_layout.addLayout(right_header_col)
 
         self.transactions_container = QVBoxLayout()
+        self.transactions_container.setSpacing(8)
         self.right_panel_layout.addLayout(self.transactions_container)
         self.right_panel_layout.addStretch()
 
-        bottom_layout.addWidget(self.left_panel, stretch=4)  
+        bottom_layout.addWidget(self.left_panel, stretch=4)
         bottom_layout.addWidget(self.right_panel, stretch=5)
-
         workspace_layout.addLayout(bottom_layout, stretch=1)
-        workspace_container.setWidget(workspace_widget)
-        master_layout.addWidget(workspace_container)
 
-    # =================================================================
-    # ⚙️ LIVE DATA LOADING LOGIC (ASYNC CONNECTION)
-    # =================================================================
+        workspace_container.setWidget(workspace_widget)
+        root.addWidget(workspace_container)
+
+    # ─────────────────────────────────────────────────────────────────────────
     def showEvent(self, event):
         super().showEvent(event)
-        self.load_live_data()
+        # The timer keeps an already-open admin dashboard current.  A show
+        # event can happen while switching windows, so don't start a second
+        # request when the existing worker is still loading.
+        if not self.refresh_timer.isActive():
+            self.refresh_timer.start()
 
     def load_live_data(self):
         if hasattr(self, 'worker') and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
-            
+            return
         self.worker = DashboardDataWorker()
         self.worker.data_loaded.connect(self.on_data_received)
         self.worker.start()
 
     def on_data_received(self, data):
-        # Cache raw chronologically ordered transactions safely
         self.all_raw_tx_records = data.get("recent_transactions", [])
-        
-        # 1. Update Main KPI metrics values
-        self.metric_values["current_stock"].setText(f"{data['current_stock_pcs']:,}<span style='font-size: 14px; font-weight: normal; color: #64748B;'> pcs</span>")
-        self.metric_values["monthly_sales"].setText(f"₱{data['monthly_sales']:,}")
-        self.metric_values["monthly_expenses"].setText(f"₱{data['monthly_expenses']:,}")
-        self.metric_values["monthly_net_profit"].setText(f"₱{data['monthly_net_profit']:,}")
+        self.latest_dashboard_data = data
+        self.update_metric_cards()
 
-        # 2. Update Low Stock Alerts
+        # Stock alerts
         while self.alerts_container.count():
             item = self.alerts_container.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
         if not data["low_stock_alerts"]:
-            healthy_banner = QFrame()
-            healthy_banner.setStyleSheet("background-color: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 10px;")
-            banner_layout = QHBoxLayout(healthy_banner)
-            banner_text = QLabel("✓  All stock levels are healthy")
-            banner_text.setFont(QFont("Arial", 13, QFont.Weight.Bold))
-            banner_text.setStyleSheet("color: #10B981;")
-            banner_layout.addWidget(banner_text, alignment=Qt.AlignmentFlag.AlignCenter)
-            self.alerts_container.addWidget(healthy_banner)
+            ok_frame = QFrame()
+            ok_frame.setStyleSheet("""
+                background-color: rgba(16,185,129,0.08);
+                border: 1px solid rgba(16,185,129,0.2);
+                border-left: 3px solid #10B981;
+                border-radius: 10px;
+            """)
+            ok_layout = QHBoxLayout(ok_frame)
+            ok_layout.setContentsMargins(16, 12, 16, 12)
+            ok_text = QLabel("All stock levels are healthy")
+            ok_text.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+            ok_text.setStyleSheet("color: #34D399; border: none; background: transparent;")
+            ok_layout.addWidget(ok_text)
+            self.alerts_container.addWidget(ok_frame)
         else:
             for alert in data["low_stock_alerts"]:
-                alert_lbl = QLabel(f"⚠️ {alert}")
-                alert_lbl.setStyleSheet("color: #EF4444; font-size: 13px; font-weight: bold; background: rgba(239, 68, 68, 0.1); padding: 8px; border-radius: 6px;")
-                self.alerts_container.addWidget(alert_lbl)
+                alert_frame = QFrame()
+                alert_frame.setStyleSheet("""
+                    background-color: rgba(239,68,68,0.08);
+                    border: 1px solid rgba(239,68,68,0.2);
+                    border-left: 3px solid #EF4444;
+                    border-radius: 10px;
+                """)
+                al = QHBoxLayout(alert_frame)
+                al.setContentsMargins(14, 10, 14, 10)
+                al_text = QLabel(f"Low Stock: {alert}")
+                al_text.setStyleSheet(
+                    "color: #F87171; font-size: 13px; font-weight: 600; "
+                    "border: none; background: transparent;")
+                al.addWidget(al_text)
+                self.alerts_container.addWidget(alert_frame)
 
-        # 3. Update Recent Transactions
+        # Recent transactions
         while self.transactions_container.count():
             item = self.transactions_container.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
         if not data["recent_transactions"]:
-            no_tx_lbl = QLabel("No transactions found yet.")
-            no_tx_lbl.setStyleSheet("color: #64748B; font-size: 13px; padding: 10px;")
-            self.transactions_container.addWidget(no_tx_lbl)
+            no_lbl = QLabel("No transactions found yet.")
+            no_lbl.setStyleSheet("color: #AAB8CA; font-size: 13px; padding: 8px 0;")
+            self.transactions_container.addWidget(no_lbl)
         else:
-            for txn in data["recent_transactions"][:5]:  # Display up to 5 latest items
-                row_strip = QFrame()
-                row_strip.setStyleSheet("background-color: rgba(15, 23, 42, 0.4); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 10px;")
-                row_layout = QHBoxLayout(row_strip)
-                row_layout.setContentsMargins(15, 12, 15, 12)
-
-                is_expense = txn.get("type", "").lower() == "expense" or float(txn.get("amount", 0)) < 0
+            for txn in data["recent_transactions"][:5]:
+                tx_type = txn.get("type", "").lower()
                 amt = float(txn.get("amount", 0))
 
-                prefix = "-" if is_expense else "+"
-                color = "#EF4444" if is_expense else "#10B981"
-                icon = "⚡" if is_expense else "📈"
-                bg = "rgba(239, 68, 68, 0.15)" if is_expense else "rgba(16, 185, 129, 0.15)"
+                if tx_type == "inventory":
+                    color = "#3B82F6"
+                    bg    = "rgba(59,130,246,0.10)"
+                    border = "#3B82F6"
+                    prefix = ""
+                elif tx_type == "expense" or amt < 0:
+                    color  = "#F87171"
+                    bg     = "rgba(239,68,68,0.08)"
+                    border = "#EF4444"
+                    prefix = "−"
+                else:
+                    color  = "#34D399"
+                    bg     = "rgba(16,185,129,0.08)"
+                    border = "#10B981"
+                    prefix = "+"
 
-                tx_icon = QLabel(icon)
-                tx_icon.setFixedSize(32, 32)
-                tx_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                tx_icon.setStyleSheet(f"background-color: {bg}; color: {color}; border-radius: 16px; font-weight: bold;")
-                
-                details_layout = QVBoxLayout()
-                
-                tx_name = QLabel(txn.get("description", "Transaction Log"))
-                tx_name.setStyleSheet("color: #F8FAFC; font-weight: bold; font-size: 13px;")
-                
-                tx_date = QLabel(txn.get("date", "Today"))
-                tx_date.setStyleSheet("color: #64748B; font-size: 11px;")
-                
-                details_layout.addWidget(tx_name)
-                details_layout.addWidget(tx_date)
+                tx_frame = QFrame()
+                tx_frame.setStyleSheet(f"""
+                    background-color: {bg};
+                    border: 1px solid rgba(255,255,255,6);
+                    border-left: 3px solid {border};
+                    border-radius: 10px;
+                """)
+                tx_row = QHBoxLayout(tx_frame)
+                tx_row.setContentsMargins(14, 10, 14, 10)
 
-                tx_val = QLabel(f"{prefix}₱{abs(amt):,}")
-                tx_val.setFont(QFont("Arial", 13, QFont.Weight.Bold))
-                tx_val.setStyleSheet(f"color: {color};")
+                desc_col = QVBoxLayout()
+                desc_col.setSpacing(2)
+                desc_lbl = QLabel(txn.get("description", "Transaction"))
+                desc_lbl.setStyleSheet(
+                    "color: #CBD5E1; font-size: 13px; font-weight: 600; "
+                    "border: none; background: transparent;")
+                date_lbl = QLabel(txn.get("date", ""))
+                date_lbl.setStyleSheet(
+                    "color: #9EADBF; font-size: 11px; border: none; background: transparent;")
+                desc_col.addWidget(desc_lbl)
+                desc_col.addWidget(date_lbl)
 
-                row_layout.addWidget(tx_icon)
-                row_layout.addSpacing(10)
-                row_layout.addLayout(details_layout)
-                row_layout.addStretch()
-                row_layout.addWidget(tx_val)
-                self.transactions_container.addWidget(row_strip)
+                amt_lbl = QLabel(f"{prefix}₱{abs(amt):,.0f}")
+                amt_lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+                amt_lbl.setStyleSheet(
+                    f"color: {color}; border: none; background: transparent;")
+                amt_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        # 4. Populate calendar dynamically with real month groupings
-        self.populate_calendar(data["monthly_history"])
+                tx_row.addLayout(desc_col)
+                tx_row.addStretch()
+                tx_row.addWidget(amt_lbl)
+                self.transactions_container.addWidget(tx_frame)
 
-    # =================================================================
-    # 📆 DYNAMIC CALENDAR GENERATION & SELECTION EVENT HANDLERS
-    # =================================================================
-    def populate_calendar(self, monthly_history):
+    def on_metric_filter_changed(self, metric_key):
+        if self.latest_dashboard_data:
+            self.update_metric_cards()
+
+    def update_metric_cards(self):
+        data = self.latest_dashboard_data
+        if not data:
+            return
+
+        stock_filter = self.metric_filters["current_stock"].currentData()
+        stock_by_size = data.get("stock_by_size", {})
+        stock = int(stock_by_size.get(stock_filter, data.get("current_stock_pcs", 0)) or 0)
+        self.metric_values["current_stock"].setText(f"{stock:,} pcs")
+        self.metric_titles["current_stock"].setText("Current Stock")
+        self.metric_subtitles["current_stock"].setText(
+            "Finished goods total" if stock_filter == "All Sizes"
+            else f"{self.metric_filters['current_stock'].currentText()} blocks"
+        )
+
+        period_totals = data.get("period_totals", {})
+        period_labels = {
+            "daily": "today",
+            "weekly": "this week",
+            "monthly": "this month",
+        }
+        metric_config = (
+            ("monthly_sales", "sales", "Sales", "#10B981"),
+            ("monthly_expenses", "expenses", "Expenses", "#F97316"),
+            ("monthly_net_profit", "net_profit", "Net Profit", "#8B5CF6"),
+        )
+        for metric_key, value_key, title, color in metric_config:
+            period_key = self.metric_filters[metric_key].currentData() or "monthly"
+            totals = period_totals.get(period_key, {})
+            value = float(totals.get(value_key, 0) or 0)
+            self.metric_titles[metric_key].setText(
+                f"{self.metric_filters[metric_key].currentText()} {title}"
+            )
+            self.metric_subtitles[metric_key].setText(
+                f"{'Sales minus expenses' if value_key == 'net_profit' else ('Total revenue' if value_key == 'sales' else 'Total costs')} {period_labels.get(period_key, 'this month')}"
+            )
+            value_label = self.metric_values[metric_key]
+            value_label.setText(
+                f"₱{value:,.0f}" if value >= 0 else f"−₱{abs(value):,.0f}"
+            )
+            value_label.setStyleSheet(
+                f"color: {'#34D399' if value >= 0 else '#F87171'}; "
+                "font-size: 24px; font-weight: bold;"
+            )
+
+        # Monthly history calendar
         while self.monthly_grid_layout.count():
             item = self.monthly_grid_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        if not monthly_history:
-            empty_msg = QLabel("No monthly data calculated. Log transactions to construct summaries.")
-            empty_msg.setStyleSheet("color: #64748B; font-size: 13px; padding: 20px;")
-            self.monthly_grid_layout.addWidget(empty_msg, 0, 0, 1, 3, Qt.AlignmentFlag.AlignCenter)
-            return
-
-        for index, item in enumerate(monthly_history):
-            month_card = QFrame()
-            month_card.setObjectName("MonthCard")
-            
-            # Interactive hover animations and click layouts
-            month_card.setStyleSheet("""
-                QFrame#MonthCard {
-                    background-color: rgba(15, 23, 42, 0.5); 
-                    border: 1px solid rgba(255, 255, 255, 0.08); 
-                    border-radius: 10px;
-                }
-                QFrame#MonthCard:hover {
-                    background-color: rgba(15, 23, 42, 0.85); 
-                    border-color: #8B5CF6;
-                }
+        for idx, month_data in enumerate(data["monthly_history"]):
+            card = QFrame()
+            net_val = month_data["net_val"]
+            card_color = "#34D399" if net_val >= 0 else "#F87171"
+            card_bg    = "rgba(16,185,129,0.08)" if net_val >= 0 else "rgba(239,68,68,0.08)"
+            card.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {card_bg};
+                    border: 1px solid rgba(255,255,255,8);
+                    border-radius: 12px;
+                }}
+                QFrame:hover {{
+                    background-color: rgba(255,255,255,0.07);
+                    border: 1px solid rgba(255,255,255,18);
+                    cursor: pointer;
+                }}
             """)
-            
-            # Change mouse cursor to hand pointer to indicate clickability
-            month_card.setCursor(Qt.CursorShape.PointingHandCursor)
-            
-            # Override card click mousePressEvent
-            month_card.mousePressEvent = lambda event, m_name=item["month"]: self.show_monthly_details(m_name)
+            card.setCursor(Qt.CursorShape.PointingHandCursor)
 
-            card_v_layout = QVBoxLayout(month_card)
-            card_v_layout.setContentsMargins(15, 15, 15, 15)
-            card_v_layout.setSpacing(10)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(16, 14, 16, 14)
+            card_layout.setSpacing(6)
 
-            card_header_layout = QHBoxLayout()
-            m_title = QLabel(item["month"])
-            m_title.setFont(QFont("Arial", 13, QFont.Weight.Bold))
-            m_title.setStyleSheet("color: #F8FAFC;")
-            
-            badge = QLabel(item["tx_count"])
-            badge.setStyleSheet("color: #94A3B8; background-color: rgba(255, 255, 255, 0.06); border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: bold;")
-            card_header_layout.addWidget(m_title)
-            card_header_layout.addStretch()
-            card_header_layout.addWidget(badge)
-            card_v_layout.addLayout(card_header_layout)
+            month_lbl = QLabel(month_data["month"])
+            month_lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+            month_lbl.setStyleSheet("color: #F1F5F9;")
 
-            details_layout = QVBoxLayout()
-            details_layout.setSpacing(6)
+            txn_lbl = QLabel(month_data["tx_count"])
+            txn_lbl.setStyleSheet("color: #9EADBF; font-size: 11px;")
 
-            for label, value, color in [("Sales:", item["sales"], "#10B981"), ("Expenses:", item["expenses"], "#EF4444")]:
-                row = QHBoxLayout()
-                row.addWidget(QLabel(label, styleSheet="color: #94A3B8; font-size: 12px;"))
-                row.addStretch()
-                val_lbl = QLabel(value, styleSheet=f"color: {color}; font-weight: bold; font-size: 12px;")
-                row.addWidget(val_lbl)
-                details_layout.addLayout(row)
+            row2 = QHBoxLayout()
+            sales_lbl = QLabel(f"↑ {month_data['sales']}")
+            sales_lbl.setStyleSheet("color: #34D399; font-size: 12px; font-weight: 600;")
+            exp_lbl = QLabel(f"↓ {month_data['expenses']}")
+            exp_lbl.setStyleSheet("color: #F87171; font-size: 12px; font-weight: 600;")
+            row2.addWidget(sales_lbl)
+            row2.addStretch()
+            row2.addWidget(exp_lbl)
 
-            div = QFrame()
-            div.setStyleSheet("background-color: rgba(255, 255, 255, 0.08); max-height: 1px;")
-            details_layout.addWidget(div)
+            net_lbl_card = QLabel(f"Net: {month_data['net']}")
+            net_lbl_card.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+            net_lbl_card.setStyleSheet(f"color: {card_color};")
 
-            net_row = QHBoxLayout()
-            net_row.addWidget(QLabel("Net:", styleSheet="color: #94A3B8; font-size: 12px;"))
-            net_row.addStretch()
-            
-            net_color = "#10B981" if item["net_val"] >= 0 else "#EF4444"
-            net_row.addWidget(QLabel(item["net"], styleSheet=f"color: {net_color}; font-weight: bold; font-size: 12px;"))
-            details_layout.addLayout(net_row)
-            
-            card_v_layout.addLayout(details_layout)
-            self.monthly_grid_layout.addWidget(month_card, index // 3, index % 3)
+            card_layout.addWidget(month_lbl)
+            card_layout.addWidget(txn_lbl)
+            card_layout.addLayout(row2)
+            card_layout.addWidget(net_lbl_card)
 
-    def show_monthly_details(self, target_month_label):
-        """Filters all transactions for the selected month card and brings up details Dialog."""
-        month_mappings = {
-            "January": "01", "February": "02", "March": "03", "April": "04",
-            "May": "05", "June": "06", "July": "07", "August": "08",
-            "September": "09", "October": "10", "November": "11", "December": "12"
-        }
+            month_key = month_data["month"]
+            card.mousePressEvent = lambda e, mk=month_key: self.on_monthly_card_clicked(mk)
 
+            col = idx % 4
+            row = idx // 4
+            self.monthly_grid_layout.addWidget(card, row, col)
+
+    def on_monthly_card_clicked(self, month_label):
         try:
-            parts = target_month_label.split()
-            month_name = parts[0]
-            year_val = parts[1]
-            month_num = month_mappings.get(month_name, "01")
-            target_prefix = f"{year_val}-{month_num}"  # e.g., "2026-07"
+            dt = datetime.strptime(month_label, "%B %Y")
+            target_prefix = dt.strftime("%Y-%m")
         except Exception:
             target_prefix = "2026-07"
 
-        # Dynamically filter cached list matching year-month prefix
-        monthly_filtered = []
-        for tx in self.all_raw_tx_records:
-            tx_date = tx.get("date", "")
-            if tx_date and tx_date.startswith(target_prefix):
-                monthly_filtered.append(tx)
-
-        # Launch modern Dialog modal
-        dialog = MonthlyDetailsDialog(target_month_label, monthly_filtered, self)
+        monthly_filtered = [
+            tx for tx in self.all_raw_tx_records
+            if tx.get("date", "").startswith(target_prefix)
+        ]
+        dialog = MonthlyDetailsDialog(month_label, monthly_filtered, self)
         dialog.exec()
 
     def toggle_history_calendar(self):
         is_visible = self.monthly_grid_widget.isVisible()
         self.monthly_grid_widget.setVisible(not is_visible)
-        self.calendar_toggle_btn.setText("Hide Calendar" if not is_visible else "View Calendar")
+        self.calendar_toggle_btn.setText(
+            "Hide Calendar" if not is_visible else "View Calendar")
+
+    def handle_nav_inventory(self):
+        try:
+            from inventory_view import BlockFlowInventory
+            self.inv_window = BlockFlowInventory(role=self.user_role)
+            self.inv_window.show()
+            self.close()
+        except ImportError:
+            pass
+
+    def handle_nav_analytics(self):
+        if not self.is_admin:
+            return
+        try:
+            from analytics_view import BlockFlowAnalytics
+            self.analytics_window = BlockFlowAnalytics(role=self.user_role)
+            self.analytics_window.show()
+            self.close()
+        except ImportError:
+            pass
 
     def handle_logout(self):
         try:
@@ -885,6 +1185,7 @@ class BlockFlowDashboard(QFrame):
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
             self.close()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
