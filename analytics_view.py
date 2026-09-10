@@ -17,7 +17,16 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from PyQt6.QtCore import Qt, QRectF, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QFont,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -36,6 +45,7 @@ from PyQt6.QtWidgets import (
 )
 
 from database import get_transaction_history
+from ui_utils import BlurredDialog
 
 API_BASE_URL = os.environ.get(
     "BLOCKFLOW_API_URL",
@@ -81,6 +91,31 @@ def _sales_records(records: list[dict[str, Any]]) -> list[tuple[date, float]]:
             continue
         sales.append((recorded_date, amount))
     return sales
+
+def _expense_records(records: list[dict[str, Any]]) -> list[tuple[date, float]]:
+    expenses = []
+    for record in records:
+        if str(record.get("type", "")).lower() != "expense":
+            continue
+        recorded_date = _parse_date(record.get("date"))
+        if recorded_date is None:
+            continue
+        try:
+            amount = float(record.get("amount", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        # Expenses are stored as negative amounts in the transaction log.
+        expenses.append((recorded_date, abs(amount)))
+    return expenses
+
+def _sales_target(values: list[float], growth: float = 0.10) -> float:
+    """Target sales for a period, based on the historical average of past
+    periods plus an assumed growth rate (defaults to +10%)."""
+    positive = [v for v in values if v > 0]
+    if not positive:
+        return 0.0
+    average = sum(positive) / len(positive)
+    return average * (1 + growth)
 
 def _load_transaction_history() -> list[dict[str, Any]]:
     try:
@@ -185,29 +220,65 @@ def _autoregressive_forecast(values: list[float]) -> float:
 # SALES LINE CHART
 # ============================================================
 class SalesLineChart(QWidget):
+    """A clean, low-clutter line chart: sales (blue, filled), expenses
+    (red), and an optional target reference line (dashed amber). Zero-value
+    points are not labeled and label placement auto-flips to avoid
+    overlapping the axis or the legend, so the chart stays readable even
+    with several series drawn at once."""
+
+    RED = "#F87171"
+    AMBER = "#FBBF24"
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.series: list[dict[str, Any]] = []
-        self.setMinimumHeight(168)
-        self.setMaximumHeight(190)
+        self.expenses: list[dict[str, Any]] = []
+        self.target: float | None = None
+        self.setMinimumHeight(320)
+        self.setMaximumHeight(360)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-    def set_series(self, series: list[dict[str, Any]]) -> None:
+    def set_series(
+        self,
+        series: list[dict[str, Any]],
+        expenses: list[dict[str, Any]] | None = None,
+        target: float | None = None,
+    ) -> None:
         self.series = series
+        self.expenses = expenses or []
+        self.target = target
         self.update()
+
+    @staticmethod
+    def _chip(painter: QPainter, rect: QRectF, text: str, color: QColor) -> None:
+        """Small rounded pill behind a label so it stays legible over grid lines."""
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(9, 14, 26, 225))
+        painter.drawRoundedRect(rect, 5, 5)
+        painter.setPen(color)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        left, top = 48, 14
-        right = max(left + 20, self.width() - 18)
-        bottom = max(top + 20, self.height() - 34)
-        chart = QRectF(left, top, right - left, bottom - top)
 
+        # Always paint a fresh, fully opaque background first. Without this,
+        # Qt can leave the previous frame's pixels in place (e.g. after
+        # switching Weekly/Monthly/Quarterly), so old labels/lines "ghost"
+        # through the new chart and make everything look crowded.
+        painter.fillRect(self.rect(), QColor("#0A1120"))
+        card = QRectF(0.5, 0.5, self.width() - 1, self.height() - 1)
         painter.setPen(QPen(QColor(255, 255, 255, 18), 1))
-        for row in range(5):
-            y = chart.top() + chart.height() * row / 4
-            painter.drawLine(int(chart.left()), int(y), int(chart.right()), int(y))
+        painter.setBrush(QColor("#0A1120"))
+        painter.drawRoundedRect(card, 10, 10)
+
+        left, top = 68, 48
+        right = max(left + 20, self.width() - 22)
+        # Reserve a full, dedicated band at the bottom purely for the date
+        # labels (drawn at chart.bottom()+10..+30) so they never sit close
+        # enough to the stat cards below to look blocked or overlapped.
+        bottom = max(top + 20, self.height() - 64)
+        chart = QRectF(left, top, right - left, bottom - top)
 
         if not self.series:
             painter.setPen(QColor(MUTED))
@@ -216,34 +287,144 @@ class SalesLineChart(QWidget):
             return
 
         values = [float(item["value"]) for item in self.series]
-        scale_max = max(values) if max(values) > 0 else 1
-        points = []
-        for index, value in enumerate(values):
-            x = chart.left() if len(values) == 1 else chart.left() + chart.width() * index / (len(values) - 1)
-            y = chart.bottom() - (value / scale_max) * chart.height()
-            points.append((x, y))
+        expense_values = [float(item.get("value", 0) or 0) for item in self.expenses] if self.expenses else [0.0] * len(values)
+        all_values = values + expense_values + ([self.target] if self.target else [])
+        scale_max = max(all_values) if max(all_values) > 0 else 1
+        scale_max *= 1.18  # headroom so the highest point/label never touches the legend
 
-        painter.setPen(QPen(QColor(BLUE), 3))
-        for first, second in zip(points, points[1:]):
-            painter.drawLine(int(first[0]), int(first[1]), int(second[0]), int(second[1]))
+        # ---- gridlines (kept sparse on purpose — 5 lines reads cleaner than 8) ----
+        num_grid_lines = 5
+        painter.setPen(QPen(QColor(255, 255, 255, 16), 1))
+        for row in range(num_grid_lines + 1):
+            y = chart.top() + chart.height() * row / num_grid_lines
+            painter.drawLine(int(chart.left()), int(y), int(chart.right()), int(y))
 
-        painter.setFont(QFont("Segoe UI", 9))
-        for index, ((x, y), item) in enumerate(zip(points, self.series)):
-            painter.setBrush(QColor("#0B1120"))
-            painter.setPen(QPen(QColor(BLUE), 2))
-            painter.drawEllipse(int(x - 4), int(y - 4), 8, 8)
-            if len(self.series) <= 8 or index in {0, len(self.series) - 1}:
-                painter.setPen(QColor(MUTED))
-                painter.drawText(QRectF(x - 50, chart.bottom() + 6, 100, 24), Qt.AlignmentFlag.AlignCenter, str(item["label"]))
-
+        painter.setFont(QFont("Segoe UI", 8))
         painter.setPen(QColor(MUTED))
-        for row in range(5):
-            value = scale_max * (4 - row) / 4
+        for row in range(num_grid_lines + 1):
+            value = scale_max * (num_grid_lines - row) / num_grid_lines
+            y = chart.top() + chart.height() * row / num_grid_lines
             painter.drawText(
-                QRectF(0, chart.top() + chart.height() * row - 8, 42, 20),
+                QRectF(0, y - 8, left - 10, 16),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 f"₱{value:,.0f}" if value else "₱0",
             )
+
+        def to_points(vals: list[float]) -> list[tuple[float, float]]:
+            pts = []
+            for index, value in enumerate(vals):
+                x = chart.left() if len(vals) == 1 else chart.left() + chart.width() * index / (len(vals) - 1)
+                y = chart.bottom() - (value / scale_max) * chart.height()
+                pts.append((x, y))
+            return pts
+
+        points = to_points(values)
+        expense_points = to_points(expense_values) if self.expenses else []
+
+        # ---- target reference line (drawn first, sits behind the data) ----
+        if self.target:
+            target_y = chart.bottom() - (self.target / scale_max) * chart.height()
+            pen = QPen(QColor(self.AMBER), 1.6, Qt.PenStyle.CustomDashLine)
+            pen.setDashPattern([5, 4])
+            painter.setPen(pen)
+            painter.drawLine(int(chart.left()), int(target_y), int(chart.right()), int(target_y))
+
+            label = f"Target ₱{self.target:,.0f}"
+            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            text_w = painter.fontMetrics().horizontalAdvance(label) + 14
+            label_above = (target_y - chart.top()) > 22
+            chip_y = target_y - 20 if label_above else target_y + 5
+            self._chip(painter, QRectF(chart.left() + 6, chip_y, text_w, 17), label, QColor(self.AMBER))
+
+        # ---- soft fill under the sales line for visual weight ----
+        if len(points) >= 2:
+            path = QPainterPath()
+            path.moveTo(points[0][0], chart.bottom())
+            for x, y in points:
+                path.lineTo(x, y)
+            path.lineTo(points[-1][0], chart.bottom())
+            path.closeSubpath()
+            gradient = QLinearGradient(0, chart.top(), 0, chart.bottom())
+            gradient.setColorAt(0.0, QColor(59, 130, 246, 65))
+            gradient.setColorAt(1.0, QColor(59, 130, 246, 0))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(gradient))
+            painter.drawPath(path)
+
+        # ---- expenses line (red) ----
+        if expense_points:
+            pen = QPen(QColor(self.RED), 2.2)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            for first, second in zip(expense_points, expense_points[1:]):
+                painter.drawLine(int(first[0]), int(first[1]), int(second[0]), int(second[1]))
+
+            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            for (x, y), item in zip(expense_points, self.expenses):
+                painter.setBrush(QColor("#0B1120"))
+                painter.setPen(QPen(QColor(self.RED), 2))
+                painter.drawEllipse(QRectF(x - 3.5, y - 3.5, 7, 7))
+
+                value = float(item.get("value", 0) or 0)
+                if value <= 0:
+                    continue  # skip zero labels — the flat line at the baseline already says it
+                text = f"₱{value:,.0f}"
+                text_w = painter.fontMetrics().horizontalAdvance(text) + 10
+                below_ok = (chart.bottom() - y) > 34
+                label_y = y + 7 if below_ok else y - 22
+                self._chip(painter, QRectF(x - text_w / 2, label_y, text_w, 16), text, QColor("#FCA5A5"))
+
+        # ---- sales line (blue), drawn on top ----
+        pen = QPen(QColor(BLUE), 2.6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        for first, second in zip(points, points[1:]):
+            painter.drawLine(int(first[0]), int(first[1]), int(second[0]), int(second[1]))
+
+        for index, ((x, y), item) in enumerate(zip(points, self.series)):
+            painter.setBrush(QColor("#0B1120"))
+            painter.setPen(QPen(QColor(BLUE), 2))
+            painter.drawEllipse(QRectF(x - 4, y - 4, 8, 8))
+
+            value = float(item["value"])
+            if value > 0:
+                text = f"₱{value:,.0f}"
+                painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+                text_w = painter.fontMetrics().horizontalAdvance(text) + 10
+                above_ok = (y - chart.top()) > 26
+                label_y = y - 24 if above_ok else y + 9
+                self._chip(painter, QRectF(x - text_w / 2, label_y, text_w, 17), text, QColor("#93C5FD"))
+
+            if len(self.series) <= 8 or index in {0, len(self.series) - 1}:
+                painter.setFont(QFont("Segoe UI", 8))
+                painter.setPen(QColor(MUTED))
+                painter.drawText(
+                    QRectF(x - 55, chart.bottom() + 10, 110, 20),
+                    Qt.AlignmentFlag.AlignCenter,
+                    str(item["label"]),
+                )
+
+        # ---- legend, top-right ----
+        legend_items = [(BLUE, "Sales")]
+        if self.expenses:
+            legend_items.append((self.RED, "Expenses"))
+        if self.target:
+            legend_items.append((self.AMBER, "Target"))
+        painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        legend_x = chart.right()
+        legend_y = 14
+        for color, label in reversed(legend_items):
+            text_width = painter.fontMetrics().horizontalAdvance(label)
+            legend_x -= text_width
+            painter.setPen(QColor(TEXT_SECONDARY))
+            painter.drawText(QRectF(legend_x, legend_y, text_width + 2, 14), Qt.AlignmentFlag.AlignLeft, label)
+            legend_x -= 16
+            painter.setBrush(QColor(color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(int(legend_x), legend_y + 2, 9, 9)
+            legend_x -= 16
         painter.end()
 
 # ============================================================
@@ -259,30 +440,104 @@ class MatplotlibSalesChart(FigureCanvas):
         self.figure.set_facecolor("#080D1A")
         self.axes.set_facecolor("#0A1120")
 
-    def set_series(self, series: list[dict[str, Any]]) -> None:
+    def set_series(
+        self,
+        series: list[dict[str, Any]],
+        expenses: list[dict[str, Any]] | None = None,
+        target: float | None = None,
+    ) -> None:
+        """Clean, low-clutter rendering: soft area fill instead of a
+        competing bar layer, zero-value points left unlabeled, fewer
+        gridlines/ticks, and a legend that only lists series actually
+        present on the chart."""
         labels = [str(item.get("label", "")) for item in series]
         values = [float(item.get("value", 0) or 0) for item in series]
+        expense_values = [float(item.get("value", 0) or 0) for item in expenses] if expenses else []
         self.axes.clear()
         self.axes.set_facecolor("#0A1120")
-        self.axes.plot(labels, values, marker="o", linewidth=2.2, color="#3B82F6", label="Recorded sales")
-        self.axes.bar(labels, values, alpha=0.16, color="#60A5FA", label="Sales volume")
+
+        x = list(range(len(labels)))
+
+        # Soft area fill under the sales line for visual weight, no bar layer
+        self.axes.fill_between(x, values, color="#3B82F6", alpha=0.12, zorder=1)
+        self.axes.plot(x, values, marker="o", linewidth=2.4, color="#3B82F6", label="Sales", markersize=7, zorder=3)
+
+        if expense_values:
+            self.axes.plot(x, expense_values, marker="o", linewidth=2, color="#F87171", label="Expenses", markersize=6, zorder=3)
+
+        if target:
+            self.axes.axhline(y=target, color="#FBBF24", linestyle="--", linewidth=1.6, label="Target", zorder=2)
+
+        x_labels = list(labels)
         if len(values) >= 2:
             estimate = _autoregressive_forecast(values)
-            forecast_labels = labels + ["Next period"]
-            forecast_values = values + [estimate]
-            self.axes.plot(forecast_labels[-2:], forecast_values[-2:], linestyle="--", linewidth=2, marker="o", color="#10B981", label="AR(1) forecast")
-        self.axes.set_title("BlockFlow Sales Analysis", color="#F8FAFC", fontsize=13, pad=12)
-        self.axes.set_ylabel("Sales (₱)", color="#CBD5E1")
+            forecast_x = [x[-1], x[-1] + 1]
+            self.axes.plot(forecast_x, [values[-1], estimate], linestyle="--", linewidth=1.8, marker="o",
+                            color="#34D399", label="AR(1) forecast", markersize=6, zorder=3)
+            x_labels = x_labels + ["Next"]
+
+        # Value labels — only on non-zero points, so flat/empty months stay quiet
+        for i, value in enumerate(values):
+            if value <= 0:
+                continue
+            self.axes.annotate(
+                f"₱{value:,.0f}", (i, value), textcoords="offset points", xytext=(0, 10), ha="center",
+                color="#93C5FD", fontsize=8.5, fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="#0F172A", alpha=0.85, edgecolor="#334155", linewidth=0.6),
+            )
+        for i, value in enumerate(expense_values):
+            if value <= 0:
+                continue
+            self.axes.annotate(
+                f"₱{value:,.0f}", (i, value), textcoords="offset points", xytext=(0, -14), ha="center",
+                color="#FCA5A5", fontsize=8.5, fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="#0F172A", alpha=0.85, edgecolor="#334155", linewidth=0.6),
+            )
+
+        self.axes.set_xticks(range(len(x_labels)))
+        self.axes.set_xticklabels(x_labels)
+
+        self.axes.set_title("Sales vs Expenses", color="#F8FAFC", fontsize=13, pad=14, fontweight="bold")
+        self.axes.set_ylabel("Amount (₱)", color="#CBD5E1", fontsize=10)
+
+        # Y-axis: fewer, evenly spaced ticks reads cleaner than a dense axis
+        combined = values + expense_values + ([target] if target else []) + [0.0]
+        y_min, y_max = min(combined), max(combined) if combined else 1000
+        y_range = (y_max - y_min) or 1
+        y_min -= y_range * 0.08
+        y_max += y_range * 0.2
+        self.axes.set_ylim(y_min, y_max)
+
+        num_ticks = 6
+        y_ticks = [y_min + (y_max - y_min) * i / (num_ticks - 1) for i in range(num_ticks)]
+        self.axes.set_yticks(y_ticks)
+        self.axes.set_yticklabels([f"₱{int(v):,}" for v in y_ticks], fontsize=9)
+
         self.axes.tick_params(colors="#CBD5E1", labelsize=9)
         for spine in self.axes.spines.values():
             spine.set_color("#334155")
-        self.axes.grid(axis="y", color="#334155", alpha=0.35)
-        self.axes.legend(facecolor="#0A1120", edgecolor="#334155", labelcolor="#CBD5E1")
+        self.axes.spines["top"].set_visible(False)
+        self.axes.spines["right"].set_visible(False)
+
+        self.axes.grid(axis="y", color="#334155", alpha=0.35, linestyle="-", linewidth=0.7)
+        self.axes.set_axisbelow(True)
+
+        self.axes.legend(facecolor="#0A1120", edgecolor="#334155", labelcolor="#CBD5E1",
+                          loc="upper left", fontsize=9, framealpha=0.7)
+
+        self.axes.tick_params(axis="x", rotation=15)
+
         self.figure.tight_layout()
         self.draw_idle()
 
-class MatplotlibSalesChartDialog(QDialog):
-    def __init__(self, series: list[dict[str, Any]], parent=None):
+class MatplotlibSalesChartDialog(BlurredDialog):
+    def __init__(
+        self,
+        series: list[dict[str, Any]],
+        parent=None,
+        expenses: list[dict[str, Any]] | None = None,
+        target: float | None = None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("BlockFlow — Matplotlib Sales Chart")
         self.setMinimumSize(820, 470)
@@ -293,7 +548,7 @@ class MatplotlibSalesChartDialog(QDialog):
         """)
         layout = QVBoxLayout(self)
         self.chart = MatplotlibSalesChart(self)
-        self.chart.set_series(series)
+        self.chart.set_series(series, expenses=expenses, target=target)
         layout.addWidget(self.chart)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.accept)
@@ -319,14 +574,14 @@ class AIWorker(QThread):
 # ============================================================
 # SALES ANALYTICS REPORT DIALOG
 # ============================================================
-class SalesAnalyticsReportDialog(QDialog):
+class SalesAnalyticsReportDialog(BlurredDialog):
     def __init__(self, records: list[dict[str, Any]], parent=None):
         super().__init__(parent)
         self.records = records
         self.period = "monthly"
         self.series: list[dict[str, Any]] = []
         self.setWindowTitle("Sales Analytics Report")
-        self.setMinimumSize(820, 720)
+        self.setMinimumSize(860, 840)
         
         self.setStyleSheet("""
             QDialog { background: #080D1A; color: #F8FAFC; border: 1px solid rgba(255,255,255,18); }
@@ -335,7 +590,7 @@ class SalesAnalyticsReportDialog(QDialog):
         """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 18, 22, 20)
-        layout.setSpacing(10)
+        layout.setSpacing(14)
 
         header = QHBoxLayout()
         title = QLabel("Sales Analytics Report")
@@ -368,17 +623,20 @@ class SalesAnalyticsReportDialog(QDialog):
 
         self.chart = SalesLineChart()
         layout.addWidget(self.chart)
+        layout.addSpacing(18)
 
-        self.peak = QLabel()
-        self.peak.setStyleSheet("""
-            QLabel { background: rgba(37,99,235,80); color: #DBEAFE; border: 1px solid rgba(96,165,250,120); border-radius: 8px; padding: 9px; }
-        """)
-        layout.addWidget(self.peak)
+        peak_row = QHBoxLayout()
+        peak_row.setSpacing(8)
+        self.peak = self._stat_chip(peak_row, "🏆", "Peak Period", "#60A5FA")
+        self.target_chip = self._stat_chip(peak_row, "🎯", "Target / Period", "#FBBF24")
+        layout.addLayout(peak_row)
 
         summary_row = QHBoxLayout()
         summary_row.setSpacing(8)
         self.total_sales = self._summary_card(summary_row, "Total Sales", "#10B981")
-        self.average_sales = self._summary_card(summary_row, "Average per Period", "#60A5FA")
+        self.total_expenses = self._summary_card(summary_row, "Total Expenses", "#F87171")
+        self.net_total = self._summary_card(summary_row, "Net Profit", "#FBBF24")
+        self.average_sales = self._summary_card(summary_row, "Avg / Period", "#60A5FA")
         self.period_count = self._summary_card(summary_row, "Periods", "#A78BFA")
         layout.addLayout(summary_row)
 
@@ -455,6 +713,35 @@ class SalesAnalyticsReportDialog(QDialog):
         parent_layout.addWidget(card)
         return value_label
 
+    def _stat_chip(self, parent_layout: QHBoxLayout, icon: str, title: str, accent: str) -> QLabel:
+        """Compact pill-style stat card (icon + title + big value)."""
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{ background: rgba(15,23,42,200); border: 1px solid rgba(148,163,184,40); border-left: 3px solid {accent}; border-radius: 8px; }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setSpacing(10)
+
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet("QLabel { font-size: 16px; }")
+        layout.addWidget(icon_label)
+
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(1)
+        title_label = QLabel(title)
+        title_label.setStyleSheet("QLabel { color: #94A3B8; font-size: 10px; font-weight: 600; }")
+        value_label = QLabel("—")
+        value_label.setStyleSheet(f"QLabel {{ color: {accent}; font-size: 14px; font-weight: 700; }}")
+        text_layout.addWidget(title_label)
+        text_layout.addWidget(value_label)
+        layout.addLayout(text_layout)
+        layout.addStretch()
+
+        parent_layout.addWidget(card)
+        return value_label
+
     def set_ai_insight(self, response_text: str) -> None:
         self.ai_insights.setText(response_text.strip())
         self.generate_ai_button.setEnabled(True)
@@ -466,6 +753,7 @@ class SalesAnalyticsReportDialog(QDialog):
 
     def update_report(self):
         self.series = _series_for_period(_sales_records(self.records), self.period)
+        self.expense_series = _series_for_period(_expense_records(self.records), self.period)
         for key, button in self.period_buttons.items():
             button.setChecked(key == self.period)
             button.setStyleSheet("""
@@ -475,16 +763,22 @@ class SalesAnalyticsReportDialog(QDialog):
             """ % (BLUE_DARK if key == self.period else "rgba(255,255,255,8)"))
 
         self.chart_title.setText(f"▥ Sales Time Series Analysis — {self.period.capitalize()}")
-        self.chart.set_series(self.series)
+        values = [float(item.get("value", 0) or 0) for item in self.series]
+        self.target = _sales_target(values)
+        self.chart.set_series(self.series, expenses=self.expense_series, target=self.target)
 
         peak = max(self.series, key=lambda item: item["value"], default={"label": "N/A", "value": 0})
-        self.peak.setText(f"Peak period: {peak['label']} with ₱{peak['value']:,.0f} in sales")
+        self.peak.setText(f"{peak['label']} · ₱{peak['value']:,.0f}")
+        self.target_chip.setText(f"₱{self.target:,.0f}")
 
-        values = [float(item.get("value", 0) or 0) for item in self.series]
         total = sum(values)
         average = total / len(values) if values else 0.0
+        expense_values = [float(item.get("value", 0) or 0) for item in self.expense_series]
+        total_expenses = sum(expense_values)
 
         self.total_sales.setText(f"₱{total:,.2f}")
+        self.total_expenses.setText(f"₱{total_expenses:,.2f}")
+        self.net_total.setText(f"₱{total - total_expenses:,.2f}")
         self.average_sales.setText(f"₱{average:,.2f}")
         self.period_count.setText(str(len(values)))
 
@@ -527,8 +821,18 @@ class SalesAnalyticsReportDialog(QDialog):
             return
         with open(path, "w", newline="", encoding="utf-8") as report_file:
             writer = csv.writer(report_file)
-            writer.writerow(["Period", "Sales"])
-            writer.writerows((item["label"], f"{item['value']:.2f}") for item in self.series)
+            writer.writerow(["Period", "Sales", "Expenses", "Net", "Target"])
+            expense_lookup = {item["key"]: item["value"] for item in getattr(self, "expense_series", [])}
+            target_value = getattr(self, "target", 0.0) or 0.0
+            for item in self.series:
+                expense_value = expense_lookup.get(item["key"], 0.0)
+                writer.writerow((
+                    item["label"],
+                    f"{item['value']:.2f}",
+                    f"{expense_value:.2f}",
+                    f"{item['value'] - expense_value:.2f}",
+                    f"{target_value:.2f}",
+                ))
 
 # ============================================================
 # BLOCKFLOW ANALYTICS
@@ -585,27 +889,72 @@ class BlockFlowAnalytics(QFrame):
         root.setSpacing(0)
 
         nav = QFrame()
-        nav.setFixedHeight(64)
-        nav.setStyleSheet("QFrame { background: rgba(6,10,22,235); border-bottom: 1px solid rgba(255,255,255,10); }")
+        nav.setFixedHeight(68)
+        nav.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(12, 16, 32, 245), stop:1 rgba(7, 10, 21, 245));
+                border-bottom: 1px solid rgba(255,255,255,10);
+            }
+        """)
         nav_layout = QHBoxLayout(nav)
-        nav_layout.setContentsMargins(28, 0, 28, 0)
+        nav_layout.setContentsMargins(28, 0, 24, 0)
         nav_layout.setSpacing(0)
 
-        brand_badge = QLabel("BF")
-        brand_badge.setFixedSize(34, 34)
-        brand_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_badge.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        brand_badge.setStyleSheet("""
-            QLabel { color: white; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3B82F6, stop:1 #8B5CF6); border-radius: 9px; }
-        """)
+        is_admin = self.role in ("owner", "admin")
 
+        brand_frame = QFrame()
+        brand_frame.setFixedSize(44, 44)
+        brand_frame.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                    stop:0 rgba(59,130,246,45), stop:1 rgba(139,92,246,45));
+                border: 1px solid rgba(255,255,255,22);
+                border-radius: 13px;
+            }
+        """)
+        brand_frame_layout = QVBoxLayout(brand_frame)
+        brand_frame_layout.setContentsMargins(0, 0, 0, 0)
+
+        brand_badge = QLabel()
+        brand_badge.setFixedSize(30, 30)
+        brand_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Load Logo.png
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_path = os.path.join(script_dir, "Logo.png")
+        if os.path.exists(logo_path):
+            logo_pixmap = QPixmap(logo_path)
+            scaled_logo = logo_pixmap.scaled(
+                30, 30,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            brand_badge.setPixmap(scaled_logo)
+        else:
+            # Fallback if logo not found
+            brand_badge.setText("BF")
+            brand_badge.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            brand_badge.setStyleSheet("""
+                QLabel { color: white; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3B82F6, stop:1 #8B5CF6); border-radius: 8px; }
+            """)
+        brand_frame_layout.addWidget(brand_badge, 0, Qt.AlignmentFlag.AlignCenter)
+
+        brand_text_col = QVBoxLayout()
+        brand_text_col.setSpacing(0)
         brand_label = QLabel("BlockFlow")
         brand_label.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
-        brand_label.setStyleSheet("QLabel { color: #F8FAFC; padding-left: 10px; }")
+        brand_label.setStyleSheet("QLabel { color: #F8FAFC; letter-spacing: 0.3px; }")
+        brand_sub = QLabel("BLOCKS TRADING")
+        brand_sub.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        brand_sub.setStyleSheet("QLabel { color: #64748B; letter-spacing: 1.4px; }")
+        brand_text_col.addWidget(brand_label)
+        brand_text_col.addWidget(brand_sub)
 
-        nav_layout.addWidget(brand_badge)
-        nav_layout.addWidget(brand_label)
-        nav_layout.addSpacing(36)
+        nav_layout.addWidget(brand_frame)
+        nav_layout.addSpacing(12)
+        nav_layout.addLayout(brand_text_col)
+        nav_layout.addSpacing(32)
 
         separator = QFrame()
         separator.setFixedSize(1, 28)
@@ -626,23 +975,81 @@ class BlockFlowAnalytics(QFrame):
         nav_layout.addWidget(analytics)
         nav_layout.addStretch()
 
-        admin = QLabel("👤 Admin" if self.role in ("owner", "admin") else "👷 Staff")
-        admin.setStyleSheet("""
-            QLabel { color: #CBD5E1; background: rgba(30,41,59,180); padding: 7px 16px; border-radius: 18px; border: 1px solid rgba(255,255,255,10); font-weight: 600; }
+        user_chip = QFrame()
+        user_chip.setObjectName("UserChip")
+        user_chip.setFixedHeight(44)
+        user_chip.setStyleSheet("""
+            QFrame#UserChip {
+                background-color: rgba(30,41,59,150);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 22px;
+            }
         """)
+        chip_layout = QHBoxLayout(user_chip)
+        chip_layout.setContentsMargins(6, 0, 18, 0)
+        chip_layout.setSpacing(10)
+
+        avatar_grad = "stop:0 #3B82F6, stop:1 #8B5CF6" if is_admin else "stop:0 #14B8A6, stop:1 #0891B2"
+        avatar = QLabel("A" if is_admin else "S")
+        avatar.setFixedSize(30, 30)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        avatar.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        avatar.setStyleSheet("""
+            color: white;
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:1, %s);
+            border-radius: 15px;
+        """ % avatar_grad)
+
+        role_col = QVBoxLayout()
+        role_col.setSpacing(0)
+        role_title = QLabel("Admin" if is_admin else "Staff")
+        role_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        role_title.setStyleSheet("color: #F1F5F9;")
+        role_caption = QLabel("Full Access" if is_admin else "Limited Access")
+        role_caption.setFont(QFont("Segoe UI", 9, QFont.Weight.Medium))
+        role_caption.setStyleSheet("color: %s;" % ("#93C5FD" if is_admin else "#5EEAD4"))
+        role_col.addWidget(role_title)
+        role_col.addWidget(role_caption)
+
+        chip_layout.addWidget(avatar)
+        chip_layout.addLayout(role_col)
 
         logout = QPushButton("Logout")
-        logout.setFixedHeight(34)
+        logout.setFixedHeight(44)
+        logout.setCursor(Qt.CursorShape.PointingHandCursor)
         logout.setStyleSheet("""
-            QPushButton { color: #CBD5E1; background: rgba(30,41,59,160); padding: 0 18px; border-radius: 17px; border: 1px solid rgba(255,255,255,10); font-weight: 600; }
-            QPushButton:hover { color: #F87171; background: rgba(239,68,68,35); }
+            QPushButton {
+                color: #F87171;
+                background-color: rgba(239,68,68,0.10);
+                padding: 0 22px;
+                border-radius: 22px;
+                border: 1px solid rgba(239,68,68,0.30);
+                font-weight: 700;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: rgba(239,68,68,0.85);
+                border-color: rgba(239,68,68,0.85);
+                color: #FEF2F2;
+            }
+            QPushButton:pressed {
+                background-color: rgba(185,28,28,0.95);
+            }
         """)
         logout.clicked.connect(self.handle_logout)
 
-        nav_layout.addWidget(admin)
-        nav_layout.addSpacing(10)
+        nav_layout.addWidget(user_chip)
+        nav_layout.addSpacing(12)
         nav_layout.addWidget(logout)
         root.addWidget(nav)
+
+        accent_line = QFrame()
+        accent_line.setFixedHeight(2)
+        accent_line.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #3B82F6, stop:0.5 #8B5CF6, stop:1 #22D3EE);
+        """)
+        root.addWidget(accent_line)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -681,11 +1088,11 @@ class BlockFlowAnalytics(QFrame):
         self.main_chart = SalesLineChart()
         chart_layout.addWidget(self.main_chart)
 
-        self.main_peak = QLabel()
-        self.main_peak.setStyleSheet("""
-            QLabel { background: rgba(37,99,235,80); color: #DBEAFE; border: 1px solid rgba(96,165,250,120); border-radius: 8px; padding: 8px; font-weight: 600; }
-        """)
-        chart_layout.addWidget(self.main_peak)
+        stat_row = QHBoxLayout()
+        stat_row.setSpacing(8)
+        self.main_peak = self._stat_chip(stat_row, "🏆", "Peak Month", "#60A5FA")
+        self.main_net = self._stat_chip(stat_row, "Σ", "Net (Sales − Expenses)", "#34D399")
+        chart_layout.addLayout(stat_row)
 
         report_button = QPushButton("▣ Create Report")
         report_button.setFixedHeight(34)
@@ -832,16 +1239,57 @@ class BlockFlowAnalytics(QFrame):
         """)
         return panel
 
+    def _stat_chip(self, parent_layout: QHBoxLayout, icon: str, title: str, accent: str) -> QLabel:
+        """A compact pill-style stat card (icon + title + big value), used
+        in place of one crammed line of text so figures stay separated and
+        easy to scan at a glance."""
+        card = QFrame()
+        card.setStyleSheet(f"""
+            QFrame {{ background: rgba(15,23,42,200); border: 1px solid rgba(148,163,184,40); border-left: 3px solid {accent}; border-radius: 8px; }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setSpacing(10)
+
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet("QLabel { font-size: 16px; }")
+        layout.addWidget(icon_label)
+
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(1)
+        title_label = QLabel(title)
+        title_label.setStyleSheet("QLabel { color: #94A3B8; font-size: 10px; font-weight: 600; }")
+        value_label = QLabel("—")
+        value_label.setObjectName("StatChipValue")
+        value_label.setStyleSheet(f"QLabel#StatChipValue {{ color: {accent}; font-size: 14px; font-weight: 700; }}")
+        text_layout.addWidget(title_label)
+        text_layout.addWidget(value_label)
+        layout.addLayout(text_layout)
+        layout.addStretch()
+
+        parent_layout.addWidget(card)
+        return value_label
+
     def reload_data(self):
         try:
             self.records = _load_transaction_history()
         except Exception:
             self.records = []
         sales = _sales_records(self.records)
+        expenses = _expense_records(self.records)
         series = _series_for_period(sales, "monthly")
-        self.main_chart.set_series(series)
+        expense_series = _series_for_period(expenses, "monthly")
+        target = _sales_target([item["value"] for item in series])
+        self.main_chart.set_series(series, expenses=expense_series, target=target)
         peak = max(series, key=lambda item: item["value"], default={"label": "N/A", "value": 0})
-        self.main_peak.setText(f"Peak month: {peak['label']} with ₱{peak['value']:,.0f} in sales")
+        total_sales = sum(item["value"] for item in series)
+        total_expenses = sum(item["value"] for item in expense_series)
+        net = total_sales - total_expenses
+        self.main_peak.setText(f"{peak['label']} · ₱{peak['value']:,.0f}")
+        self.main_net.setText(f"₱{net:,.0f}")
+        net_color = "#34D399" if net >= 0 else "#F87171"
+        self.main_net.setStyleSheet(f"QLabel#StatChipValue {{ color: {net_color}; font-size: 14px; font-weight: 700; }}")
         self.forecast_current.setText(f"Current Month: {date.today().strftime('%B %Y')}")
         self._update_forecast_inputs()
 
@@ -849,8 +1297,12 @@ class BlockFlowAnalytics(QFrame):
         SalesAnalyticsReportDialog(self.records, self).exec()
 
     def open_matplotlib_chart(self):
-        series = _series_for_period(_sales_records(self.records), "monthly")
-        MatplotlibSalesChartDialog(series, self).exec()
+        sales = _sales_records(self.records)
+        expenses = _expense_records(self.records)
+        series = _series_for_period(sales, "monthly")
+        expense_series = _series_for_period(expenses, "monthly")
+        target = _sales_target([item["value"] for item in series])
+        MatplotlibSalesChartDialog(series, self, expenses=expense_series, target=target).exec()
 
     def calculate_forecast(self):
         values = []

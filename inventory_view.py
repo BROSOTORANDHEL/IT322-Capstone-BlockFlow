@@ -8,8 +8,10 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QFrame, QTableWidget, QTableWidgetItem,
     QHeaderView, QDialog, QComboBox, QLineEdit, QDateEdit, QMessageBox,
-    QGraphicsOpacityEffect, QSizePolicy
+    QGraphicsOpacityEffect, QSizePolicy, QStackedWidget
 )
+
+from ui_utils import BlurredDialog
 
 BASE_API_URL = os.environ.get(
     "BLOCKFLOW_API_URL", "http://127.0.0.1:8000/api"
@@ -95,7 +97,7 @@ def _field_label(text):
 # =============================================================================
 # RECORD SALES MODAL
 # =============================================================================
-class RecordSalesDialog(QDialog):
+class RecordSalesDialog(BlurredDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Record Sale")
@@ -204,7 +206,7 @@ class RecordSalesDialog(QDialog):
 # =============================================================================
 # RECORD EXPENSE MODAL
 # =============================================================================
-class RecordExpenseDialog(QDialog):
+class RecordExpenseDialog(BlurredDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Record Expense")
@@ -294,7 +296,7 @@ class RecordExpenseDialog(QDialog):
 # =============================================================================
 # RECORD STOCK MODAL
 # =============================================================================
-class RecordStockDialog(QDialog):
+class RecordStockDialog(BlurredDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Hollowblocks Stock")
@@ -452,35 +454,74 @@ class BlockFlowInventory(QWidget):
         # TOP NAV BAR  (replaces sidebar)
         # ══════════════════════════════════════════════════════════════
         nav_bar = QFrame()
-        nav_bar.setFixedHeight(64)
+        nav_bar.setFixedHeight(68)
         nav_bar.setObjectName("NavBar")
         nav_bar.setStyleSheet("""
             QFrame#NavBar {
-                background-color: rgba(6, 10, 22, 230);
-                border-bottom: 1px solid rgba(255,255,255,8);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(12, 16, 32, 245), stop:1 rgba(7, 10, 21, 245));
+                border-bottom: 1px solid rgba(255,255,255,10);
             }
         """)
         nav_layout = QHBoxLayout(nav_bar)
-        nav_layout.setContentsMargins(28, 0, 28, 0)
+        nav_layout.setContentsMargins(28, 0, 24, 0)
         nav_layout.setSpacing(0)
 
         # Brand
-        brand_badge = QLabel("BF")
-        brand_badge.setFixedSize(34, 34)
-        brand_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_badge.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        brand_badge.setStyleSheet("""
-            color: white;
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3B82F6,stop:1 #8B5CF6);
-            border-radius: 9px;
+        brand_frame = QFrame()
+        brand_frame.setFixedSize(44, 44)
+        brand_frame.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                    stop:0 rgba(59,130,246,45), stop:1 rgba(139,92,246,45));
+                border: 1px solid rgba(255,255,255,22);
+                border-radius: 13px;
+            }
         """)
+        brand_frame_layout = QVBoxLayout(brand_frame)
+        brand_frame_layout.setContentsMargins(0, 0, 0, 0)
+
+        brand_badge = QLabel()
+        brand_badge.setFixedSize(30, 30)
+        brand_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Load Logo.png
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_path = os.path.join(script_dir, "Logo.png")
+        if os.path.exists(logo_path):
+            logo_pixmap = QPixmap(logo_path)
+            scaled_logo = logo_pixmap.scaled(
+                30, 30,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            brand_badge.setPixmap(scaled_logo)
+        else:
+            # Fallback if logo not found
+            brand_badge.setText("BF")
+            brand_badge.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            brand_badge.setStyleSheet("""
+                color: white;
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3B82F6,stop:1 #8B5CF6);
+                border-radius: 8px;
+            """)
+        brand_frame_layout.addWidget(brand_badge, 0, Qt.AlignmentFlag.AlignCenter)
+
+        brand_text_col = QVBoxLayout()
+        brand_text_col.setSpacing(0)
         brand_label = QLabel("BlockFlow")
         brand_label.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
-        brand_label.setStyleSheet("color: #F1F5F9; padding-left: 10px; letter-spacing: 0.3px;")
+        brand_label.setStyleSheet("color: #F8FAFC; letter-spacing: 0.3px;")
+        brand_sub = QLabel("BLOCKS TRADING")
+        brand_sub.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        brand_sub.setStyleSheet("color: #64748B; letter-spacing: 1.4px;")
+        brand_text_col.addWidget(brand_label)
+        brand_text_col.addWidget(brand_sub)
 
-        nav_layout.addWidget(brand_badge)
-        nav_layout.addWidget(brand_label)
-        nav_layout.addSpacing(36)
+        nav_layout.addWidget(brand_frame)
+        nav_layout.addSpacing(12)
+        nav_layout.addLayout(brand_text_col)
+        nav_layout.addSpacing(32)
 
         # Separator
         sep = QFrame()
@@ -489,15 +530,15 @@ class BlockFlowInventory(QWidget):
         nav_layout.addWidget(sep)
         nav_layout.addSpacing(28)
 
-        # Nav buttons — Dashboard only visible to admin/owner
+        # Nav buttons — Dashboard is available to everyone now that staff
+        # has a (limited) dashboard view too. Analytics stays admin-only.
         self.btn_nav_inv = self._nav_button("Inventory", True)
 
         is_admin = self.user_role in ("owner", "admin")
-        if is_admin:
-            self.btn_nav_dash = self._nav_button("Dashboard", False)
-            self.btn_nav_dash.clicked.connect(self.handle_nav_dashboard)
-            nav_layout.addWidget(self.btn_nav_dash)
-            nav_layout.addSpacing(4)
+        self.btn_nav_dash = self._nav_button("Dashboard", False)
+        self.btn_nav_dash.clicked.connect(self.handle_nav_dashboard)
+        nav_layout.addWidget(self.btn_nav_dash)
+        nav_layout.addSpacing(4)
 
         nav_layout.addWidget(self.btn_nav_inv)
         if is_admin:
@@ -507,44 +548,83 @@ class BlockFlowInventory(QWidget):
             nav_layout.addWidget(self.btn_nav_analytics)
         nav_layout.addStretch()
 
-        # Right side — user badge + logout
-        badge_label = "👤  Admin" if is_admin else "👷  Staff"
-        user_badge = QLabel(badge_label)
-        user_badge.setStyleSheet("""
-            color: #CBD5E1;
-            background-color: rgba(30,41,59,180);
-            padding: 7px 16px;
-            border-radius: 18px;
-            border: 1px solid rgba(255,255,255,10);
-            font-weight: 600;
-            font-size: 13px;
+        # Right side — user chip + logout
+        user_chip = QFrame()
+        user_chip.setObjectName("UserChip")
+        user_chip.setFixedHeight(44)
+        user_chip.setStyleSheet("""
+            QFrame#UserChip {
+                background-color: rgba(30,41,59,150);
+                border: 1px solid rgba(255,255,255,14);
+                border-radius: 22px;
+            }
         """)
+        chip_layout = QHBoxLayout(user_chip)
+        chip_layout.setContentsMargins(6, 0, 18, 0)
+        chip_layout.setSpacing(10)
+
+        avatar_grad = "stop:0 #3B82F6, stop:1 #8B5CF6" if is_admin else "stop:0 #14B8A6, stop:1 #0891B2"
+        avatar = QLabel("A" if is_admin else "S")
+        avatar.setFixedSize(30, 30)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        avatar.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        avatar.setStyleSheet("""
+            color: white;
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:1, %s);
+            border-radius: 15px;
+        """ % avatar_grad)
+
+        role_col = QVBoxLayout()
+        role_col.setSpacing(0)
+        role_title = QLabel("Admin" if is_admin else "Staff")
+        role_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        role_title.setStyleSheet("color: #F1F5F9;")
+        role_caption = QLabel("Full Access" if is_admin else "Limited Access")
+        role_caption.setFont(QFont("Segoe UI", 9, QFont.Weight.Medium))
+        role_caption.setStyleSheet("color: %s;" % ("#93C5FD" if is_admin else "#5EEAD4"))
+        role_col.addWidget(role_title)
+        role_col.addWidget(role_caption)
+
+        chip_layout.addWidget(avatar)
+        chip_layout.addLayout(role_col)
 
         btn_logout_top = QPushButton("Logout")
-        btn_logout_top.setFixedHeight(34)
+        btn_logout_top.setFixedHeight(44)
+        btn_logout_top.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_logout_top.setStyleSheet("""
             QPushButton {
-                color: #94A3B8;
-                background-color: rgba(30,41,59,160);
-                padding: 0 18px;
-                border-radius: 17px;
-                border: 1px solid rgba(255,255,255,10);
-                font-weight: 600;
+                color: #F87171;
+                background-color: rgba(239,68,68,0.10);
+                padding: 0 22px;
+                border-radius: 22px;
+                border: 1px solid rgba(239,68,68,0.30);
+                font-weight: 700;
                 font-size: 13px;
             }
             QPushButton:hover {
-                background-color: rgba(239,68,68,0.18);
-                border-color: rgba(239,68,68,0.35);
-                color: #F87171;
+                background-color: rgba(239,68,68,0.85);
+                border-color: rgba(239,68,68,0.85);
+                color: #FEF2F2;
+            }
+            QPushButton:pressed {
+                background-color: rgba(185,28,28,0.95);
             }
         """)
         btn_logout_top.clicked.connect(self.handle_logout)
 
-        nav_layout.addWidget(user_badge)
-        nav_layout.addSpacing(10)
+        nav_layout.addWidget(user_chip)
+        nav_layout.addSpacing(12)
         nav_layout.addWidget(btn_logout_top)
 
         root.addWidget(nav_bar)
+
+        accent_line = QFrame()
+        accent_line.setFixedHeight(2)
+        accent_line.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #3B82F6, stop:0.5 #8B5CF6, stop:1 #22D3EE);
+        """)
+        root.addWidget(accent_line)
 
         # ══════════════════════════════════════════════════════════════
         # MAIN CONTENT
@@ -640,28 +720,9 @@ class BlockFlowInventory(QWidget):
         """)
         self.search_box.textChanged.connect(self.filter_table)
 
-        self.btn_add_action = QPushButton("+ Record Sale")
-        self.btn_add_action.setFixedHeight(38)
-        self.btn_add_action.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #059669, stop:1 #10B981);
-                color: white; padding: 0 22px;
-                font-weight: bold; border-radius: 10px; border: none; font-size: 13px;
-                letter-spacing: 0.2px;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #047857, stop:1 #059669);
-            }
-            QPushButton:pressed { background-color: #047857; }
-        """)
-        self.btn_add_action.clicked.connect(self.handle_add_action_click)
-
         toolbar.addWidget(self.table_title)
         toolbar.addStretch()
         toolbar.addWidget(self.search_box)
-        toolbar.addWidget(self.btn_add_action)
         content_layout.addLayout(toolbar)
 
         # ── Data table ────────────────────────────────────────────────
@@ -738,10 +799,352 @@ class BlockFlowInventory(QWidget):
         )
 
         wrapper_layout.addWidget(self.table)
-        content_layout.addWidget(table_wrapper)
+
+        # ── Records (left) + live entry form (right) side by side ─────
+        records_row = QHBoxLayout()
+        records_row.setSpacing(16)
+        records_row.addWidget(table_wrapper, stretch=3)
+        records_row.addWidget(self._build_entry_panel(), stretch=2)
+        content_layout.addLayout(records_row)
 
         root.addWidget(content_area)
         self.switch_tab("sales")
+
+    # ── Live entry panel (right-hand side form) ─────────────────────────────────
+    def _build_entry_panel(self):
+        self.entry_panel = QFrame()
+        self.entry_panel.setObjectName("EntryPanel")
+        self.entry_panel.setMinimumWidth(300)
+        self.entry_panel.setMaximumWidth(380)
+        self._style_entry_panel("#10B981")
+
+        outer = QVBoxLayout(self.entry_panel)
+        outer.setContentsMargins(22, 20, 22, 22)
+        outer.setSpacing(12)
+
+        self.entry_title = QLabel("Record Sale")
+        self.entry_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        self.entry_title.setStyleSheet("color: #F1F5F9;")
+        outer.addWidget(self.entry_title)
+
+        self.entry_stack = QStackedWidget()
+        self.entry_stack.addWidget(self._build_sales_entry_page())
+        self.entry_stack.addWidget(self._build_expense_entry_page())
+        self.entry_stack.addWidget(self._build_stock_entry_page())
+        outer.addWidget(self.entry_stack)
+        outer.addStretch()
+
+        return self.entry_panel
+
+    def _style_entry_panel(self, accent):
+        self.entry_panel.setStyleSheet(f"""
+            QFrame#EntryPanel {{
+                background-color: rgba(6, 10, 22, 175);
+                border-radius: 16px;
+                border: 1px solid {accent};
+            }}
+            QLabel {{ color: #AAB8CA; font-size: 10px; font-weight: bold; letter-spacing: 1.2px; }}
+            QLineEdit, QComboBox, QDateEdit {{
+                background-color: rgba(30,41,59,200);
+                color: #F1F5F9;
+                border: 1px solid rgba(255,255,255,15);
+                border-radius: 10px;
+                padding: 9px 12px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{
+                border: 1px solid {accent};
+                background-color: rgba(30,41,59,240);
+            }}
+            QComboBox::drop-down {{ border: none; width: 22px; }}
+            QComboBox QAbstractItemView {{
+                background-color: #111827;
+                color: #F1F5F9;
+                selection-background-color: #1E293B;
+                border: 1px solid rgba(255,255,255,12);
+            }}
+        """)
+
+    def _build_sales_entry_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        layout.addWidget(_field_label("Customer Name"))
+        self.inline_sales_cust = QLineEdit()
+        self.inline_sales_cust.setPlaceholderText("e.g., Juan Dela Cruz")
+        layout.addWidget(self.inline_sales_cust)
+
+        layout.addWidget(_field_label("Construction Shop"))
+        self.inline_sales_shop = QLineEdit()
+        self.inline_sales_shop.setPlaceholderText("e.g., ABC Construction Supply")
+        layout.addWidget(self.inline_sales_shop)
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        col1 = QVBoxLayout()
+        col1.setSpacing(6)
+        col1.addWidget(_field_label("Size"))
+        self.inline_sales_size = QComboBox()
+        self.inline_sales_size.addItems(["L (Large) — ₱7/pc", "XL (Extra Large) — ₱8/pc"])
+        col1.addWidget(self.inline_sales_size)
+        col2 = QVBoxLayout()
+        col2.setSpacing(6)
+        col2.addWidget(_field_label("Quantity"))
+        self.inline_sales_qty = QLineEdit()
+        self.inline_sales_qty.setPlaceholderText("0")
+        col2.addWidget(self.inline_sales_qty)
+        row.addLayout(col1, stretch=3)
+        row.addLayout(col2, stretch=2)
+        layout.addLayout(row)
+
+        layout.addWidget(_field_label("Sale Date"))
+        self.inline_sales_date = QDateEdit()
+        self.inline_sales_date.setDate(QDate.currentDate())
+        self.inline_sales_date.setCalendarPopup(True)
+        self.inline_sales_date.setDisplayFormat("MM/dd/yyyy")
+        layout.addWidget(self.inline_sales_date)
+
+        layout.addSpacing(4)
+        self.inline_sales_submit = QPushButton("Record Sale")
+        self.inline_sales_submit.setFixedHeight(42)
+        self.inline_sales_submit.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #059669, stop:1 #10B981);
+                color: white; border: none; border-radius: 10px;
+                font-weight: bold; font-size: 13px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #047857, stop:1 #059669);
+            }
+        """)
+        self.inline_sales_submit.clicked.connect(self.submit_inline_sale)
+        layout.addWidget(self.inline_sales_submit)
+
+        return page
+
+    def _build_expense_entry_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        layout.addWidget(_field_label("Category"))
+        self.inline_expense_category = QComboBox()
+        self.inline_expense_category.addItems(["Raw Materials", "Maintenance", "Utilities", "Logistics", "Other"])
+        layout.addWidget(self.inline_expense_category)
+
+        layout.addWidget(_field_label("Expense Description"))
+        self.inline_expense_desc = QLineEdit()
+        self.inline_expense_desc.setPlaceholderText("e.g., Portland cement (50 bags)")
+        layout.addWidget(self.inline_expense_desc)
+
+        layout.addWidget(_field_label("Amount (PHP)"))
+        self.inline_expense_amount = QLineEdit()
+        self.inline_expense_amount.setPlaceholderText("e.g., 2500.00")
+        layout.addWidget(self.inline_expense_amount)
+
+        layout.addWidget(_field_label("Date Recorded"))
+        self.inline_expense_date = QDateEdit()
+        self.inline_expense_date.setDate(QDate.currentDate())
+        self.inline_expense_date.setCalendarPopup(True)
+        self.inline_expense_date.setDisplayFormat("MM/dd/yyyy")
+        layout.addWidget(self.inline_expense_date)
+
+        layout.addSpacing(4)
+        self.inline_expense_submit = QPushButton("Save Expense")
+        self.inline_expense_submit.setFixedHeight(42)
+        self.inline_expense_submit.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #DC2626, stop:1 #EF4444);
+                color: white; border: none; border-radius: 10px;
+                font-weight: bold; font-size: 13px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #B91C1C, stop:1 #DC2626);
+            }
+        """)
+        self.inline_expense_submit.clicked.connect(self.submit_inline_expense)
+        layout.addWidget(self.inline_expense_submit)
+        layout.addStretch()
+
+        return page
+
+    def _build_stock_entry_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        layout.addWidget(_field_label("Hollowblock Size"))
+        self.inline_stock_size = QComboBox()
+        self.inline_stock_size.addItems(["L (Large) — ₱7/pc", "XL (Extra Large) — ₱8/pc", "None"])
+        layout.addWidget(self.inline_stock_size)
+
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        col1 = QVBoxLayout()
+        col1.setSpacing(6)
+        col1.addWidget(_field_label("Quantity"))
+        self.inline_stock_qty = QLineEdit()
+        self.inline_stock_qty.setPlaceholderText("e.g., 100")
+        col1.addWidget(self.inline_stock_qty)
+        col2 = QVBoxLayout()
+        col2.setSpacing(6)
+        col2.addWidget(_field_label("Unit"))
+        self.inline_stock_unit = QComboBox()
+        self.inline_stock_unit.addItems(["pcs", "bags", "cubic meters"])
+        col2.addWidget(self.inline_stock_unit)
+        row.addLayout(col1, stretch=3)
+        row.addLayout(col2, stretch=2)
+        layout.addLayout(row)
+
+        layout.addSpacing(4)
+        self.inline_stock_submit = QPushButton("Save Stock")
+        self.inline_stock_submit.setFixedHeight(42)
+        self.inline_stock_submit.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #2563EB, stop:1 #3B82F6);
+                color: white; border: none; border-radius: 10px;
+                font-weight: bold; font-size: 13px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #1D4ED8, stop:1 #2563EB);
+            }
+        """)
+        self.inline_stock_submit.clicked.connect(self.submit_inline_stock)
+        layout.addWidget(self.inline_stock_submit)
+        layout.addStretch()
+
+        return page
+
+    # ── Inline form submit handlers ─────────────────────────────────────────────
+    def submit_inline_sale(self):
+        cust = self.inline_sales_cust.text().strip()
+        shop = self.inline_sales_shop.text().strip()
+        if not cust:
+            QMessageBox.warning(self, "Validation Error", "Please enter customer name.")
+            return
+        if not shop:
+            QMessageBox.warning(self, "Validation Error", "Please enter the construction shop name.")
+            return
+        try:
+            qty = int(self.inline_sales_qty.text().strip())
+            if qty <= 0:
+                raise ValueError()
+        except ValueError:
+            QMessageBox.warning(self, "Validation Error", "Please enter a valid positive quantity.")
+            return
+
+        size_text = self.inline_sales_size.currentText()
+        size_code = "XL (Extra Large)" if "XL" in size_text else "L (Large)"
+        sale_date_str = self.inline_sales_date.date().toString("yyyy-MM-dd")
+        data = {
+            "customer_name": cust,
+            "shop_name": shop,
+            "block_size": size_code,
+            "quantity": qty,
+            "sale_date": sale_date_str,
+        }
+        payload = json.dumps(data).encode('utf-8')
+        request = QNetworkRequest(QUrl(f"{BASE_API_URL}/sales"))
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        reply = self.network_manager.post(request, payload)
+
+        unit_price = 8.0 if "XL" in size_code else 7.0
+        size_short = "XL" if "XL" in size_code else "L"
+        receipt_txn = {
+            "type": "sale",
+            "description": f"{size_short} x{qty} — {cust} ({shop})",
+            "amount": qty * unit_price,
+            "date": sale_date_str,
+        }
+        reply.finished.connect(lambda: self._on_post_done(
+            reply, self.fetch_sales_async, self._clear_inline_sale,
+            success_extra=lambda resp: self._show_sale_receipt(receipt_txn, resp)
+        ))
+
+    def submit_inline_expense(self):
+        try:
+            clean_str = self.inline_expense_amount.text().replace(",", "").replace("₱", "").strip()
+            amount = float(clean_str)
+            if amount <= 0:
+                raise ValueError()
+        except ValueError:
+            QMessageBox.warning(self, "Validation Error", "Please enter a valid positive amount.")
+            return
+        if not self.inline_expense_desc.text().strip():
+            QMessageBox.warning(self, "Validation Error", "Please provide a description.")
+            return
+
+        data = {
+            "expense_name": self.inline_expense_desc.text().strip() or "Unspecified Expense",
+            "amount": amount,
+            "category": self.inline_expense_category.currentText(),
+            "date_added": self.inline_expense_date.date().toString("yyyy-MM-dd"),
+        }
+        payload = json.dumps(data).encode('utf-8')
+        request = QNetworkRequest(QUrl(f"{BASE_API_URL}/expenses"))
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        reply = self.network_manager.post(request, payload)
+        reply.finished.connect(lambda: self._on_post_done(reply, self.fetch_expenses_async, self._clear_inline_expense))
+
+    def submit_inline_stock(self):
+        try:
+            qty_val = int(self.inline_stock_qty.text().strip())
+            if qty_val <= 0:
+                raise ValueError()
+        except ValueError:
+            QMessageBox.warning(self, "Validation Error", "Please enter a valid positive quantity.")
+            return
+
+        selected_size = self.inline_stock_size.currentText()
+        db_size = "None"
+        price_val = 0.0
+        if "XL" in selected_size or "₱8" in selected_size:
+            db_size = "XL"
+            price_val = 8.0
+        elif "L" in selected_size and "XL" not in selected_size:
+            db_size = "L"
+            price_val = 7.0
+
+        data = {
+            "size": db_size,
+            "quantity": qty_val,
+            "unit": self.inline_stock_unit.currentText(),
+            "price": price_val,
+            "date_added": QDate.currentDate().toString("yyyy-MM-dd"),
+        }
+        payload = json.dumps(data).encode('utf-8')
+        request = QNetworkRequest(QUrl(f"{BASE_API_URL}/inventory"))
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        reply = self.network_manager.post(request, payload)
+        reply.finished.connect(lambda: self._on_post_done(reply, self.fetch_inventory_async, self._clear_inline_stock))
+
+    def _clear_inline_sale(self):
+        self.inline_sales_cust.clear()
+        self.inline_sales_shop.clear()
+        self.inline_sales_qty.clear()
+        self.inline_sales_size.setCurrentIndex(0)
+        self.inline_sales_date.setDate(QDate.currentDate())
+
+    def _clear_inline_expense(self):
+        self.inline_expense_desc.clear()
+        self.inline_expense_amount.clear()
+        self.inline_expense_category.setCurrentIndex(0)
+        self.inline_expense_date.setDate(QDate.currentDate())
+
+    def _clear_inline_stock(self):
+        self.inline_stock_qty.clear()
+        self.inline_stock_size.setCurrentIndex(0)
+        self.inline_stock_unit.setCurrentIndex(0)
 
     # ── Nav button helper ──────────────────────────────────────────────────────
     def _nav_button(self, text, active=False):
@@ -864,72 +1267,34 @@ class BlockFlowInventory(QWidget):
         if tab_name == "expenses":
             activate_card(self.card_expense, "#EF4444", "rgba(239,68,68,0.25)")
             self.table_title.setText("Expense Records")
-            self.btn_add_action.setText("+ Record Expense")
-            self.btn_add_action.setStyleSheet("""
-                QPushButton {
-                    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                        stop:0 #DC2626, stop:1 #EF4444);
-                    color: white; padding: 0 22px;
-                    font-weight: bold; border-radius: 10px; border: none; font-size: 13px;
-                }
-                QPushButton:hover {
-                    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                        stop:0 #B91C1C, stop:1 #DC2626);
-                }
-            """)
             self.table.setColumnCount(4)
             self.table.setHorizontalHeaderLabels(["DATE", "CATEGORY", "DESCRIPTION", "AMOUNT"])
+            self.entry_title.setText("Record Expense")
+            self.entry_stack.setCurrentIndex(1)
+            self._style_entry_panel("#EF4444")
 
         elif tab_name == "stock":
             activate_card(self.card_stock, "#3B82F6", "rgba(59,130,246,0.25)")
             self.table_title.setText("Hollowblocks Stock Records")
-            self.btn_add_action.setText("+ Add Stock")
-            self.btn_add_action.setStyleSheet("""
-                QPushButton {
-                    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                        stop:0 #2563EB, stop:1 #3B82F6);
-                    color: white; padding: 0 22px;
-                    font-weight: bold; border-radius: 10px; border: none; font-size: 13px;
-                }
-                QPushButton:hover {
-                    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                        stop:0 #1D4ED8, stop:1 #2563EB);
-                }
-            """)
             self.table.setColumnCount(4)
             self.table.setHorizontalHeaderLabels(
                 ["SIZE", "QUANTITY", "UNIT", "DATE ADDED"]
             )
+            self.entry_title.setText("Add Hollowblocks Stock")
+            self.entry_stack.setCurrentIndex(2)
+            self._style_entry_panel("#3B82F6")
 
         elif tab_name == "sales":
             activate_card(self.card_sales, "#10B981", "rgba(16,185,129,0.25)")
             self.table_title.setText("Sales Records")
-            self.btn_add_action.setText("+ Record Sale")
-            self.btn_add_action.setStyleSheet("""
-                QPushButton {
-                    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                        stop:0 #059669, stop:1 #10B981);
-                    color: white; padding: 0 22px;
-                    font-weight: bold; border-radius: 10px; border: none; font-size: 13px;
-                }
-                QPushButton:hover {
-                    background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                        stop:0 #047857, stop:1 #059669);
-                }
-            """)
             self.table.setColumnCount(6)
             self.table.setHorizontalHeaderLabels(
                 ["DATE", "CUSTOMER NAME", "SHOP NAME", "PRODUCT SIZE", "QUANTITY", "TOTAL AMOUNT"])
+            self.entry_title.setText("Record Sale")
+            self.entry_stack.setCurrentIndex(0)
+            self._style_entry_panel("#10B981")
 
         self.refresh_table()
-
-    def handle_add_action_click(self):
-        if self.current_tab == "expenses":
-            self.open_record_expense_modal()
-        elif self.current_tab == "stock":
-            self.open_record_stock_modal()
-        elif self.current_tab == "sales":
-            self.open_record_sales_modal()
 
     # ── Search / filter ───────────────────────────────────────────────────────
     def filter_table(self, query):
@@ -1094,7 +1459,7 @@ class BlockFlowInventory(QWidget):
             reply = self.network_manager.post(request, payload)
             reply.finished.connect(lambda: self._on_post_done(reply, self.fetch_inventory_async))
 
-    def _on_post_done(self, reply: QNetworkReply, refresh_fn):
+    def _on_post_done(self, reply: QNetworkReply, refresh_fn, clear_fn=None, success_extra=None):
         if reply.error() != QNetworkReply.NetworkError.NoError:
             QMessageBox.critical(self, "Save Failed", reply.errorString())
         else:
@@ -1114,12 +1479,30 @@ class BlockFlowInventory(QWidget):
                 )
             else:
                 refresh_fn()
+                if clear_fn:
+                    clear_fn()
+                if success_extra:
+                    success_extra(response_data)
         reply.deleteLater()
+
+    def _show_sale_receipt(self, txn, response_data=None):
+        # Reuses the same receipt dialog shown on the Dashboard's Recent
+        # Transactions so both places look identical. A "Print Receipt"
+        # button can be added to ReceiptDialog later without touching this.
+        receipt_data = dict(txn)
+        if response_data:
+            receipt_data["id"] = response_data.get("id")
+        try:
+            from dashboard_view import ReceiptDialog
+        except ImportError:
+            return
+        dialog = ReceiptDialog(receipt_data, self)
+        dialog.exec()
 
     def handle_nav_dashboard(self):
         try:
             from dashboard_view import BlockFlowDashboard
-            self.dash_window = BlockFlowDashboard()
+            self.dash_window = BlockFlowDashboard(role=self.user_role)
             self.dash_window.show()
             self.close()
         except ImportError:
