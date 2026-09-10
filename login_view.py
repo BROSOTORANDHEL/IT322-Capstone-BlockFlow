@@ -74,18 +74,33 @@ class BlockFlowLogin(QWidget):
         inner_layout.setContentsMargins(42, 36, 42, 36)
         inner_layout.setSpacing(0)
 
-        # Brand logo badge
+        # Brand logo badge - Load from Logo.png
         logo_row = QHBoxLayout()
-        logo_badge = QLabel("BF")
-        logo_badge.setFixedSize(52, 52)
+        logo_badge = QLabel()
+        
+        # Load the Logo.png image
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_path = os.path.join(script_dir, "Logo.png")
+        if os.path.exists(logo_path):
+            logo_pixmap = QPixmap(logo_path)
+            scaled_logo = logo_pixmap.scaled(
+                60, 60,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            logo_badge.setPixmap(scaled_logo)
+        else:
+            # Fallback to text if image not found
+            logo_badge.setText("BF")
+            logo_badge.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+            logo_badge.setStyleSheet("""
+                color: #FFFFFF;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #3B82F6, stop:1 #8B5CF6);
+                border-radius: 14px;
+            """)
+        
         logo_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_badge.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-        logo_badge.setStyleSheet("""
-            color: #FFFFFF;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                stop:0 #3B82F6, stop:1 #8B5CF6);
-            border-radius: 14px;
-        """)
         logo_row.addStretch()
         logo_row.addWidget(logo_badge)
         logo_row.addStretch()
@@ -280,8 +295,34 @@ class BlockFlowLogin(QWidget):
             if response.status_code in (200, 201):
                 data = response.json()
                 user_role = data.get('role', 'client')
-
-                if "owner" in user_role.lower() or "admin" in user_role.lower():
+                
+                # Show splash screen and wait for it to close before loading dashboard
+                try:
+                    from splash_screen import SplashScreen
+                    from PyQt6.QtWidgets import QApplication
+                    
+                    splash = SplashScreen()
+                    splash.show()
+                    
+                    # Wait for splash to close before continuing
+                    def load_dashboard():
+                        # Both owner/admin and staff land on the Dashboard —
+                        # BlockFlowDashboard itself trims what staff can see
+                        # (limited KPIs, no full Transaction History, etc.)
+                        # and staff can still navigate to Inventory from there.
+                        try:
+                            from dashboard_view import BlockFlowDashboard
+                            self.dashboard_window = BlockFlowDashboard(role=user_role)
+                            self.dashboard_window.showFullScreen()
+                            self.close()
+                        except ImportError:
+                            QMessageBox.critical(self, "Import Error", "Could not find 'dashboard_view.py'.")
+                    
+                    # Connect splash closed signal to load dashboard
+                    splash.closed.connect(load_dashboard)
+                    
+                except ImportError:
+                    # Fallback if splash screen not found
                     try:
                         from dashboard_view import BlockFlowDashboard
                         self.dashboard_window = BlockFlowDashboard(role=user_role)
@@ -289,14 +330,6 @@ class BlockFlowLogin(QWidget):
                         self.close()
                     except ImportError:
                         QMessageBox.critical(self, "Import Error", "Could not find 'dashboard_view.py'.")
-                else:
-                    try:
-                        from inventory_view import BlockFlowInventory
-                        self.inventory_window = BlockFlowInventory(role=user_role)
-                        self.inventory_window.showFullScreen()
-                        self.close()
-                    except ImportError:
-                        QMessageBox.critical(self, "Import Error", "Could not find 'inventory_view.py'.")
             else:
                 detail = response.json().get("detail", "Invalid credentials")
                 QMessageBox.critical(self, "Login Failed", f"Authentication Rejected:\n{detail}")
