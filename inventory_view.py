@@ -11,11 +11,57 @@ from PyQt6.QtWidgets import (
     QGraphicsOpacityEffect, QSizePolicy, QStackedWidget
 )
 
-from ui_utils import BlurredDialog
+from ui_utils import BlurredDialog, show_critical, show_warning
+
+
+def _format_phone_number(text: str) -> str:
+    """Keep only digits (max 11) and space them as 'XXXX XXX XXXX'."""
+    digits = "".join(ch for ch in text if ch.isdigit())[:11]
+    parts = []
+    if len(digits) > 0:
+        parts.append(digits[0:4])
+    if len(digits) > 4:
+        parts.append(digits[4:7])
+    if len(digits) > 7:
+        parts.append(digits[7:11])
+    return " ".join(parts)
+
+
+def _attach_phone_formatter(line_edit: QLineEdit) -> None:
+    """Auto-format a QLineEdit as a PH-style phone number while typing."""
+    line_edit.setMaxLength(13)  # 11 digits + 2 spaces, e.g. 0917 123 4567
+
+    def _on_text_changed(text: str) -> None:
+        formatted = _format_phone_number(text)
+        if formatted != text:
+            line_edit.blockSignals(True)
+            line_edit.setText(formatted)
+            line_edit.setCursorPosition(len(formatted))
+            line_edit.blockSignals(False)
+
+    line_edit.textChanged.connect(_on_text_changed)
 
 BASE_API_URL = os.environ.get(
     "BLOCKFLOW_API_URL", "http://127.0.0.1:8000/api"
 ).rstrip("/")
+
+
+def format_recorded_by(value) -> str:
+    """Map the stored role ('owner'/'staff') to the label shown in the table,
+    matching the 'Admin'/'Staff' wording used in the header badge."""
+    clean = str(value or "staff").strip().lower()
+    return "Admin" if clean in ("owner", "admin", "admin / owner", "admin/owner") else "Staff"
+
+
+def normalize_user_role(value) -> str:
+    """Convert all UI/API role labels to the canonical owner/staff values."""
+    clean = str(value or "staff").strip().lower()
+    return "owner" if clean in ("owner", "admin", "admin / owner", "admin/owner") else "staff"
+
+
+def recorded_by_for_role(value) -> str:
+    """Return the canonical role that must be stored on a new record."""
+    return "owner" if normalize_user_role(value) == "owner" else "staff"
 
 # ── Shared modal stylesheet ────────────────────────────────────────────────────
 MODAL_BASE_STYLE = """
@@ -24,14 +70,14 @@ MODAL_BASE_STYLE = """
         border: 1px solid rgba(255,255,255,18);
         border-radius: 18px;
     }
-    QLabel { color: #B8C5D6; font-size: 12px; font-weight: bold; letter-spacing: 0.5px; }
+    QLabel { color: #B8C5D6; font-size: 16px; font-weight: bold; letter-spacing: 0.5px; }
     QLineEdit, QComboBox, QDateEdit {
         background-color: rgba(30,41,59,200);
         color: #F1F5F9;
         border: 1px solid rgba(255,255,255,15);
         border-radius: 10px;
         padding: 11px 14px;
-        font-size: 13px;
+        font-size: 17px;
         min-height: 18px;
     }
     QLineEdit:focus, QComboBox:focus, QDateEdit:focus {
@@ -45,9 +91,14 @@ MODAL_BASE_STYLE = """
         color: #F1F5F9;
         selection-background-color: #1E293B;
         border: 1px solid rgba(255,255,255,12);
+        outline: none;
+    }
+    QComboBox QAbstractItemView::item {
+        padding: 8px 12px;
+        min-height: 26px;
     }
     QPushButton {
-        font-size: 14px; font-weight: bold;
+        font-size: 17px; font-weight: bold;
         border-radius: 10px; padding: 12px;
     }
 """
@@ -69,15 +120,15 @@ def _make_modal_header(title_text, close_callback):
     layout = QHBoxLayout()
     layout.setSpacing(0)
     title = QLabel(title_text)
-    title.setFont(QFont("Segoe UI", 17, QFont.Weight.Bold))
-    title.setStyleSheet("color: #F1F5F9; font-size: 17px; font-weight: bold; letter-spacing: 0;")
+    title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+    title.setStyleSheet("color: #F1F5F9; font-size: 20px; font-weight: bold; letter-spacing: 0;")
     btn = QPushButton("✕")
     btn.setFixedSize(32, 32)
     btn.setStyleSheet("""
         QPushButton {
             background-color: rgba(255,255,255,8);
             color: #94A3B8; border: none;
-            border-radius: 8px; font-size: 14px;
+            border-radius: 8px; font-size: 17px;
         }
         QPushButton:hover { background-color: rgba(239,68,68,0.2); color: #F87171; }
     """)
@@ -90,7 +141,7 @@ def _make_modal_header(title_text, close_callback):
 
 def _field_label(text):
     lbl = QLabel(text.upper())
-    lbl.setStyleSheet("color: #AAB8CA; font-size: 10px; font-weight: bold; letter-spacing: 1.2px;")
+    lbl.setStyleSheet("color: #C7D2E0; font-size: 15px; font-weight: bold; letter-spacing: 0.8px;")
     return lbl
 
 
@@ -98,10 +149,11 @@ def _field_label(text):
 # RECORD SALES MODAL
 # =============================================================================
 class RecordSalesDialog(BlurredDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, user_role: str = "staff"):
         super().__init__(parent)
+        self.user_role = normalize_user_role(user_role)
         self.setWindowTitle("Record Sale")
-        self.setFixedSize(460, 470)
+        self.setFixedSize(460, 528)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.init_ui()
 
@@ -124,6 +176,12 @@ class RecordSalesDialog(BlurredDialog):
         self.input_cust = QLineEdit()
         self.input_cust.setPlaceholderText("e.g., Juan Dela Cruz")
         layout.addWidget(self.input_cust)
+
+        layout.addWidget(_field_label("Customer Number"))
+        self.input_cust_number = QLineEdit()
+        self.input_cust_number.setPlaceholderText("e.g., 0917 123 4567")
+        _attach_phone_formatter(self.input_cust_number)
+        layout.addWidget(self.input_cust_number)
 
         layout.addWidget(_field_label("Construction Shop"))
         self.input_shop = QLineEdit()
@@ -157,7 +215,7 @@ class RecordSalesDialog(BlurredDialog):
 
         layout.addSpacing(6)
         self.btn_submit = QPushButton("Record Sale")
-        self.btn_submit.setFixedHeight(42)
+        self.btn_submit.setFixedHeight(46)
         self.btn_submit.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
@@ -176,17 +234,20 @@ class RecordSalesDialog(BlurredDialog):
 
     def validate_and_accept(self):
         if not self.input_cust.text().strip():
-            QMessageBox.warning(self, "Validation Error", "Please enter customer name.")
+            show_warning(self, "Validation Error", "Please enter customer name.")
+            return
+        if not self.input_cust_number.text().strip():
+            show_warning(self, "Validation Error", "Please enter the customer number.")
             return
         if not self.input_shop.text().strip():
-            QMessageBox.warning(self, "Validation Error", "Please enter the construction shop name.")
+            show_warning(self, "Validation Error", "Please enter the construction shop name.")
             return
         try:
             qty = int(self.input_qty.text().strip())
             if qty <= 0:
                 raise ValueError()
         except ValueError:
-            QMessageBox.warning(self, "Validation Error", "Please enter a valid positive quantity.")
+            show_warning(self, "Validation Error", "Please enter a valid positive quantity.")
             return
         self.accept()
 
@@ -194,12 +255,16 @@ class RecordSalesDialog(BlurredDialog):
         size_text = self.combo_size.currentText()
         size_code = "XL (Extra Large)" if "XL" in size_text else "L (Large)"
         qty = int(self.input_qty.text().strip() or 0)
+        # Convert user_role to recorded_by: owner/admin → "owner", others → "staff"
+        recorded_by = recorded_by_for_role(self.user_role)
         return {
             "customer_name": self.input_cust.text().strip(),
+            "customer_number": self.input_cust_number.text().strip(),
             "shop_name": self.input_shop.text().strip(),
             "block_size": size_code,
             "quantity": qty,
-            "sale_date": self.input_date.date().toString("yyyy-MM-dd")
+            "sale_date": self.input_date.date().toString("yyyy-MM-dd"),
+            "recorded_by": recorded_by
         }
 
 
@@ -207,8 +272,9 @@ class RecordSalesDialog(BlurredDialog):
 # RECORD EXPENSE MODAL
 # =============================================================================
 class RecordExpenseDialog(BlurredDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, user_role: str = "staff"):
         super().__init__(parent)
+        self.user_role = normalize_user_role(user_role)
         self.setWindowTitle("Record Expense")
         self.setFixedSize(440, 460)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -253,7 +319,7 @@ class RecordExpenseDialog(BlurredDialog):
 
         layout.addSpacing(6)
         self.btn_submit = QPushButton("Save Expense")
-        self.btn_submit.setFixedHeight(42)
+        self.btn_submit.setFixedHeight(46)
         self.btn_submit.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
@@ -276,20 +342,22 @@ class RecordExpenseDialog(BlurredDialog):
             if amount <= 0:
                 raise ValueError()
         except ValueError:
-            QMessageBox.warning(self, "Validation Error", "Please enter a valid positive amount.")
+            show_warning(self, "Validation Error", "Please enter a valid positive amount.")
             return
         if not self.input_desc.text().strip():
-            QMessageBox.warning(self, "Validation Error", "Please provide a description.")
+            show_warning(self, "Validation Error", "Please provide a description.")
             return
         self.accept()
 
     def get_data(self):
         clean_str = self.input_amount.text().replace(",", "").replace("₱", "").strip()
+        recorded_by = recorded_by_for_role(self.user_role)
         return {
             "expense_name": self.input_desc.text().strip() or "Unspecified Expense",
             "amount": float(clean_str or 0.0),
             "category": self.combo_category.currentText(),
-            "date_added": self.input_date.date().toString("yyyy-MM-dd")
+            "date_added": self.input_date.date().toString("yyyy-MM-dd"),
+            "recorded_by": recorded_by
         }
 
 
@@ -297,8 +365,9 @@ class RecordExpenseDialog(BlurredDialog):
 # RECORD STOCK MODAL
 # =============================================================================
 class RecordStockDialog(BlurredDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, user_role: str = "staff"):
         super().__init__(parent)
+        self.user_role = normalize_user_role(user_role)
         self.setWindowTitle("Add Hollowblocks Stock")
         self.setFixedSize(420, 360)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -336,7 +405,7 @@ class RecordStockDialog(BlurredDialog):
         col2.setSpacing(6)
         col2.addWidget(_field_label("Unit"))
         self.combo_unit = QComboBox()
-        self.combo_unit.addItems(["pcs", "bags", "cubic meters"])
+        self.combo_unit.addItems(["pcs"])
         col2.addWidget(self.combo_unit)
         row_layout.addLayout(col1, stretch=3)
         row_layout.addLayout(col2, stretch=2)
@@ -344,7 +413,7 @@ class RecordStockDialog(BlurredDialog):
 
         layout.addSpacing(6)
         self.btn_submit = QPushButton("Save Stock")
-        self.btn_submit.setFixedHeight(42)
+        self.btn_submit.setFixedHeight(46)
         self.btn_submit.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
@@ -366,7 +435,7 @@ class RecordStockDialog(BlurredDialog):
             if qty <= 0:
                 raise ValueError()
         except ValueError:
-            QMessageBox.warning(self, "Validation Error", "Please enter a valid positive quantity.")
+            show_warning(self, "Validation Error", "Please enter a valid positive quantity.")
             return
         self.accept()
 
@@ -384,12 +453,14 @@ class RecordStockDialog(BlurredDialog):
             qty_val = int(self.input_qty.text().strip())
         except ValueError:
             qty_val = 0
+        recorded_by = recorded_by_for_role(self.user_role)
         return {
             "size": db_size,
             "quantity": qty_val,
             "unit": self.combo_unit.currentText(),
             "price": price_val,
-            "date_added": QDate.currentDate().toString("yyyy-MM-dd")
+            "date_added": QDate.currentDate().toString("yyyy-MM-dd"),
+            "recorded_by": recorded_by
         }
 
 
@@ -399,8 +470,8 @@ class RecordStockDialog(BlurredDialog):
 class BlockFlowInventory(QWidget):
     def __init__(self, role="owner"):
         super().__init__()
-        self.setFont(QFont("Segoe UI", 10))
-        self.user_role = role.lower()           # "owner"/"admin" → full access; anything else → staff
+        self.setFont(QFont("Segoe UI", 13))
+        self.user_role = normalize_user_role(role)  # canonical "owner"/"staff"
         self.setWindowTitle("BlockFlow — Inventory Management")
         self.network_manager = QNetworkAccessManager(self)
         self.current_tab = "sales"
@@ -454,7 +525,7 @@ class BlockFlowInventory(QWidget):
         # TOP NAV BAR  (replaces sidebar)
         # ══════════════════════════════════════════════════════════════
         nav_bar = QFrame()
-        nav_bar.setFixedHeight(68)
+        nav_bar.setFixedHeight(70)
         nav_bar.setObjectName("NavBar")
         nav_bar.setStyleSheet("""
             QFrame#NavBar {
@@ -499,7 +570,7 @@ class BlockFlowInventory(QWidget):
         else:
             # Fallback if logo not found
             brand_badge.setText("BF")
-            brand_badge.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            brand_badge.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
             brand_badge.setStyleSheet("""
                 color: white;
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #3B82F6,stop:1 #8B5CF6);
@@ -510,10 +581,10 @@ class BlockFlowInventory(QWidget):
         brand_text_col = QVBoxLayout()
         brand_text_col.setSpacing(0)
         brand_label = QLabel("BlockFlow")
-        brand_label.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        brand_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         brand_label.setStyleSheet("color: #F8FAFC; letter-spacing: 0.3px;")
         brand_sub = QLabel("BLOCKS TRADING")
-        brand_sub.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        brand_sub.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
         brand_sub.setStyleSheet("color: #64748B; letter-spacing: 1.4px;")
         brand_text_col.addWidget(brand_label)
         brand_text_col.addWidget(brand_sub)
@@ -551,7 +622,7 @@ class BlockFlowInventory(QWidget):
         # Right side — user chip + logout
         user_chip = QFrame()
         user_chip.setObjectName("UserChip")
-        user_chip.setFixedHeight(44)
+        user_chip.setFixedHeight(48)
         user_chip.setStyleSheet("""
             QFrame#UserChip {
                 background-color: rgba(30,41,59,150);
@@ -567,7 +638,7 @@ class BlockFlowInventory(QWidget):
         avatar = QLabel("A" if is_admin else "S")
         avatar.setFixedSize(30, 30)
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        avatar.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        avatar.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         avatar.setStyleSheet("""
             color: white;
             background: qlineargradient(x1:0,y1:0,x2:1,y2:1, %s);
@@ -577,10 +648,10 @@ class BlockFlowInventory(QWidget):
         role_col = QVBoxLayout()
         role_col.setSpacing(0)
         role_title = QLabel("Admin" if is_admin else "Staff")
-        role_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        role_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         role_title.setStyleSheet("color: #F1F5F9;")
         role_caption = QLabel("Full Access" if is_admin else "Limited Access")
-        role_caption.setFont(QFont("Segoe UI", 9, QFont.Weight.Medium))
+        role_caption.setFont(QFont("Segoe UI", 12, QFont.Weight.Medium))
         role_caption.setStyleSheet("color: %s;" % ("#93C5FD" if is_admin else "#5EEAD4"))
         role_col.addWidget(role_title)
         role_col.addWidget(role_caption)
@@ -589,7 +660,7 @@ class BlockFlowInventory(QWidget):
         chip_layout.addLayout(role_col)
 
         btn_logout_top = QPushButton("Logout")
-        btn_logout_top.setFixedHeight(44)
+        btn_logout_top.setFixedHeight(48)
         btn_logout_top.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_logout_top.setStyleSheet("""
             QPushButton {
@@ -599,7 +670,7 @@ class BlockFlowInventory(QWidget):
                 border-radius: 22px;
                 border: 1px solid rgba(239,68,68,0.30);
                 font-weight: 700;
-                font-size: 13px;
+                font-size: 16px;
             }
             QPushButton:hover {
                 background-color: rgba(239,68,68,0.85);
@@ -641,11 +712,11 @@ class BlockFlowInventory(QWidget):
         title_col.setSpacing(4)
 
         page_title = QLabel("Inventory")
-        page_title.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
+        page_title.setFont(QFont("Segoe UI", 29, QFont.Weight.Bold))
         page_title.setStyleSheet("color: #F8FAFC; letter-spacing: -0.5px;")
 
         page_sub = QLabel("Track hollowblocks stock, sales, and business expenses")
-        page_sub.setStyleSheet("color: #B8C5D6; font-size: 13px;")
+        page_sub.setStyleSheet("color: #B8C5D6; font-size: 16px;")
 
         title_col.addWidget(page_title)
         title_col.addWidget(page_sub)
@@ -660,7 +731,7 @@ class BlockFlowInventory(QWidget):
             padding: 8px 16px;
             border-radius: 14px;
             border: 1px solid rgba(255,255,255,8);
-            font-size: 12px;
+            font-size: 15px;
             font-weight: 600;
         """)
         title_row.addWidget(date_lbl)
@@ -695,13 +766,13 @@ class BlockFlowInventory(QWidget):
         toolbar.setSpacing(12)
 
         self.table_title = QLabel("Sales Records")
-        self.table_title.setFont(QFont("Segoe UI", 17, QFont.Weight.Bold))
+        self.table_title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
         self.table_title.setStyleSheet("color: #F1F5F9;")
 
         # Search bar
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("🔍  Search records...")
-        self.search_box.setFixedHeight(38)
+        self.search_box.setFixedHeight(44)
         self.search_box.setFixedWidth(240)
         self.search_box.setStyleSheet("""
             QLineEdit {
@@ -710,7 +781,7 @@ class BlockFlowInventory(QWidget):
                 border: 1px solid rgba(255,255,255,10);
                 border-radius: 10px;
                 padding: 0 14px;
-                font-size: 13px;
+                font-size: 16px;
             }
             QLineEdit::placeholder { color: #94A3B8; }
             QLineEdit:focus {
@@ -747,7 +818,7 @@ class BlockFlowInventory(QWidget):
                 border: none;
                 gridline-color: rgba(255,255,255,5);
                 color: #E2E8F0;
-                font-size: 13px;
+                font-size: 16px;
                 font-weight: 500;
             }
             QTableWidget::item {
@@ -765,10 +836,10 @@ class BlockFlowInventory(QWidget):
             QHeaderView::section {
                 background-color: rgba(3, 6, 16, 230);
                 color: #AEBBCD;
-                padding: 14px 16px;
-                font-size: 11px;
+                padding: 14px 6px;
+                font-size: 14px;
                 font-weight: bold;
-                letter-spacing: 1.4px;
+                letter-spacing: 1.0px;
                 border: none;
                 border-bottom: 1px solid rgba(255,255,255,10);
                 text-transform: uppercase;
@@ -788,14 +859,15 @@ class BlockFlowInventory(QWidget):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
         """)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setMinimumSectionSize(110)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setDefaultSectionSize(46)
+        self.table.verticalHeader().setDefaultSectionSize(54)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setDefaultAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
         )
 
         wrapper_layout.addWidget(self.table)
@@ -823,7 +895,7 @@ class BlockFlowInventory(QWidget):
         outer.setSpacing(12)
 
         self.entry_title = QLabel("Record Sale")
-        self.entry_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        self.entry_title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         self.entry_title.setStyleSheet("color: #F1F5F9;")
         outer.addWidget(self.entry_title)
 
@@ -843,14 +915,15 @@ class BlockFlowInventory(QWidget):
                 border-radius: 16px;
                 border: 1px solid {accent};
             }}
-            QLabel {{ color: #AAB8CA; font-size: 10px; font-weight: bold; letter-spacing: 1.2px; }}
+            QLabel {{ color: #C7D2E0; font-size: 15px; font-weight: bold; letter-spacing: 0.8px; }}
             QLineEdit, QComboBox, QDateEdit {{
                 background-color: rgba(30,41,59,200);
                 color: #F1F5F9;
                 border: 1px solid rgba(255,255,255,15);
                 border-radius: 10px;
-                padding: 9px 12px;
-                font-size: 13px;
+                padding: 10px 12px;
+                font-size: 17px;
+                min-height: 18px;
             }}
             QLineEdit:focus, QComboBox:focus, QDateEdit:focus {{
                 border: 1px solid {accent};
@@ -862,6 +935,12 @@ class BlockFlowInventory(QWidget):
                 color: #F1F5F9;
                 selection-background-color: #1E293B;
                 border: 1px solid rgba(255,255,255,12);
+                font-size: 17px;
+                outline: none;
+            }}
+            QComboBox QAbstractItemView::item {{
+                padding: 8px 12px;
+                min-height: 26px;
             }}
         """)
 
@@ -875,6 +954,12 @@ class BlockFlowInventory(QWidget):
         self.inline_sales_cust = QLineEdit()
         self.inline_sales_cust.setPlaceholderText("e.g., Juan Dela Cruz")
         layout.addWidget(self.inline_sales_cust)
+
+        layout.addWidget(_field_label("Customer Number"))
+        self.inline_sales_cust_number = QLineEdit()
+        self.inline_sales_cust_number.setPlaceholderText("e.g., 0917 123 4567")
+        _attach_phone_formatter(self.inline_sales_cust_number)
+        layout.addWidget(self.inline_sales_cust_number)
 
         layout.addWidget(_field_label("Construction Shop"))
         self.inline_sales_shop = QLineEdit()
@@ -908,13 +993,13 @@ class BlockFlowInventory(QWidget):
 
         layout.addSpacing(4)
         self.inline_sales_submit = QPushButton("Record Sale")
-        self.inline_sales_submit.setFixedHeight(42)
+        self.inline_sales_submit.setFixedHeight(46)
         self.inline_sales_submit.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
                     stop:0 #059669, stop:1 #10B981);
                 color: white; border: none; border-radius: 10px;
-                font-weight: bold; font-size: 13px;
+                font-weight: bold; font-size: 16px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
@@ -956,13 +1041,13 @@ class BlockFlowInventory(QWidget):
 
         layout.addSpacing(4)
         self.inline_expense_submit = QPushButton("Save Expense")
-        self.inline_expense_submit.setFixedHeight(42)
+        self.inline_expense_submit.setFixedHeight(46)
         self.inline_expense_submit.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
                     stop:0 #DC2626, stop:1 #EF4444);
                 color: white; border: none; border-radius: 10px;
-                font-weight: bold; font-size: 13px;
+                font-weight: bold; font-size: 16px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
@@ -998,7 +1083,7 @@ class BlockFlowInventory(QWidget):
         col2.setSpacing(6)
         col2.addWidget(_field_label("Unit"))
         self.inline_stock_unit = QComboBox()
-        self.inline_stock_unit.addItems(["pcs", "bags", "cubic meters"])
+        self.inline_stock_unit.addItems(["pcs"])
         col2.addWidget(self.inline_stock_unit)
         row.addLayout(col1, stretch=3)
         row.addLayout(col2, stretch=2)
@@ -1006,13 +1091,13 @@ class BlockFlowInventory(QWidget):
 
         layout.addSpacing(4)
         self.inline_stock_submit = QPushButton("Save Stock")
-        self.inline_stock_submit.setFixedHeight(42)
+        self.inline_stock_submit.setFixedHeight(46)
         self.inline_stock_submit.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
                     stop:0 #2563EB, stop:1 #3B82F6);
                 color: white; border: none; border-radius: 10px;
-                font-weight: bold; font-size: 13px;
+                font-weight: bold; font-size: 16px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
@@ -1028,19 +1113,23 @@ class BlockFlowInventory(QWidget):
     # ── Inline form submit handlers ─────────────────────────────────────────────
     def submit_inline_sale(self):
         cust = self.inline_sales_cust.text().strip()
+        cust_number = self.inline_sales_cust_number.text().strip()
         shop = self.inline_sales_shop.text().strip()
         if not cust:
-            QMessageBox.warning(self, "Validation Error", "Please enter customer name.")
+            show_warning(self, "Validation Error", "Please enter customer name.")
+            return
+        if not cust_number:
+            show_warning(self, "Validation Error", "Please enter the customer number.")
             return
         if not shop:
-            QMessageBox.warning(self, "Validation Error", "Please enter the construction shop name.")
+            show_warning(self, "Validation Error", "Please enter the construction shop name.")
             return
         try:
             qty = int(self.inline_sales_qty.text().strip())
             if qty <= 0:
                 raise ValueError()
         except ValueError:
-            QMessageBox.warning(self, "Validation Error", "Please enter a valid positive quantity.")
+            show_warning(self, "Validation Error", "Please enter a valid positive quantity.")
             return
 
         size_text = self.inline_sales_size.currentText()
@@ -1048,14 +1137,17 @@ class BlockFlowInventory(QWidget):
         sale_date_str = self.inline_sales_date.date().toString("yyyy-MM-dd")
         data = {
             "customer_name": cust,
+            "customer_number": cust_number,
             "shop_name": shop,
             "block_size": size_code,
             "quantity": qty,
             "sale_date": sale_date_str,
+            "recorded_by": recorded_by_for_role(self.user_role),
         }
         payload = json.dumps(data).encode('utf-8')
         request = QNetworkRequest(QUrl(f"{BASE_API_URL}/sales"))
         request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        request.setRawHeader(b"X-BlockFlow-Role", self.user_role.encode("utf-8"))
         reply = self.network_manager.post(request, payload)
 
         unit_price = 8.0 if "XL" in size_code else 7.0
@@ -1065,6 +1157,7 @@ class BlockFlowInventory(QWidget):
             "description": f"{size_short} x{qty} — {cust} ({shop})",
             "amount": qty * unit_price,
             "date": sale_date_str,
+            "customer_number": cust_number,
         }
         reply.finished.connect(lambda: self._on_post_done(
             reply, self.fetch_sales_async, self._clear_inline_sale,
@@ -1078,10 +1171,10 @@ class BlockFlowInventory(QWidget):
             if amount <= 0:
                 raise ValueError()
         except ValueError:
-            QMessageBox.warning(self, "Validation Error", "Please enter a valid positive amount.")
+            show_warning(self, "Validation Error", "Please enter a valid positive amount.")
             return
         if not self.inline_expense_desc.text().strip():
-            QMessageBox.warning(self, "Validation Error", "Please provide a description.")
+            show_warning(self, "Validation Error", "Please provide a description.")
             return
 
         data = {
@@ -1089,10 +1182,12 @@ class BlockFlowInventory(QWidget):
             "amount": amount,
             "category": self.inline_expense_category.currentText(),
             "date_added": self.inline_expense_date.date().toString("yyyy-MM-dd"),
+            "recorded_by": recorded_by_for_role(self.user_role),
         }
         payload = json.dumps(data).encode('utf-8')
         request = QNetworkRequest(QUrl(f"{BASE_API_URL}/expenses"))
         request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        request.setRawHeader(b"X-BlockFlow-Role", self.user_role.encode("utf-8"))
         reply = self.network_manager.post(request, payload)
         reply.finished.connect(lambda: self._on_post_done(reply, self.fetch_expenses_async, self._clear_inline_expense))
 
@@ -1102,7 +1197,7 @@ class BlockFlowInventory(QWidget):
             if qty_val <= 0:
                 raise ValueError()
         except ValueError:
-            QMessageBox.warning(self, "Validation Error", "Please enter a valid positive quantity.")
+            show_warning(self, "Validation Error", "Please enter a valid positive quantity.")
             return
 
         selected_size = self.inline_stock_size.currentText()
@@ -1121,15 +1216,18 @@ class BlockFlowInventory(QWidget):
             "unit": self.inline_stock_unit.currentText(),
             "price": price_val,
             "date_added": QDate.currentDate().toString("yyyy-MM-dd"),
+            "recorded_by": recorded_by_for_role(self.user_role),
         }
         payload = json.dumps(data).encode('utf-8')
         request = QNetworkRequest(QUrl(f"{BASE_API_URL}/inventory"))
         request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        request.setRawHeader(b"X-BlockFlow-Role", self.user_role.encode("utf-8"))
         reply = self.network_manager.post(request, payload)
         reply.finished.connect(lambda: self._on_post_done(reply, self.fetch_inventory_async, self._clear_inline_stock))
 
     def _clear_inline_sale(self):
         self.inline_sales_cust.clear()
+        self.inline_sales_cust_number.clear()
         self.inline_sales_shop.clear()
         self.inline_sales_qty.clear()
         self.inline_sales_size.setCurrentIndex(0)
@@ -1149,7 +1247,7 @@ class BlockFlowInventory(QWidget):
     # ── Nav button helper ──────────────────────────────────────────────────────
     def _nav_button(self, text, active=False):
         btn = QPushButton(text)
-        btn.setFixedHeight(36)
+        btn.setFixedHeight(42)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         if active:
             btn.setStyleSheet("""
@@ -1159,7 +1257,7 @@ class BlockFlowInventory(QWidget):
                     border: none;
                     border-radius: 8px;
                     padding: 0 18px;
-                    font-size: 13px;
+                    font-size: 16px;
                     font-weight: 700;
                 }
             """)
@@ -1171,7 +1269,7 @@ class BlockFlowInventory(QWidget):
                     border: none;
                     border-radius: 8px;
                     padding: 0 18px;
-                    font-size: 13px;
+                    font-size: 16px;
                     font-weight: 600;
                 }
                 QPushButton:hover {
@@ -1208,7 +1306,7 @@ class BlockFlowInventory(QWidget):
         # Icon + accent dot row
         top_row = QHBoxLayout()
         icon_lbl = QLabel(icon)
-        icon_lbl.setFont(QFont("Segoe UI", 20))
+        icon_lbl.setFont(QFont("Segoe UI", 23))
         icon_lbl.setStyleSheet("background: transparent; border: none;")
 
         dot = QFrame()
@@ -1220,13 +1318,13 @@ class BlockFlowInventory(QWidget):
         layout.addLayout(top_row)
 
         lbl_title = QLabel(title)
-        lbl_title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        lbl_title.setFont(QFont("Segoe UI", 17, QFont.Weight.Bold))
         lbl_title.setStyleSheet(f"color: #FFFFFF; border: none;")
 
         lbl_desc = QLabel(description)
         lbl_desc.setWordWrap(True)
         lbl_desc.setMinimumHeight(30)
-        lbl_desc.setStyleSheet("color: #C3CFDD; font-size: 12px; border: none;")
+        lbl_desc.setStyleSheet("color: #C3CFDD; font-size: 15px; border: none;")
 
         layout.addWidget(lbl_title)
         layout.addWidget(lbl_desc)
@@ -1267,8 +1365,7 @@ class BlockFlowInventory(QWidget):
         if tab_name == "expenses":
             activate_card(self.card_expense, "#EF4444", "rgba(239,68,68,0.25)")
             self.table_title.setText("Expense Records")
-            self.table.setColumnCount(4)
-            self.table.setHorizontalHeaderLabels(["DATE", "CATEGORY", "DESCRIPTION", "AMOUNT"])
+            self._set_table_headers(["DATE", "CATEGORY", "DESCRIPTION", "AMOUNT", "RECORDED BY"])
             self.entry_title.setText("Record Expense")
             self.entry_stack.setCurrentIndex(1)
             self._style_entry_panel("#EF4444")
@@ -1276,10 +1373,7 @@ class BlockFlowInventory(QWidget):
         elif tab_name == "stock":
             activate_card(self.card_stock, "#3B82F6", "rgba(59,130,246,0.25)")
             self.table_title.setText("Hollowblocks Stock Records")
-            self.table.setColumnCount(4)
-            self.table.setHorizontalHeaderLabels(
-                ["SIZE", "QUANTITY", "UNIT", "DATE ADDED"]
-            )
+            self._set_table_headers(["SIZE", "QUANTITY", "UNIT", "DATE ADDED", "RECORDED BY"])
             self.entry_title.setText("Add Hollowblocks Stock")
             self.entry_stack.setCurrentIndex(2)
             self._style_entry_panel("#3B82F6")
@@ -1287,14 +1381,28 @@ class BlockFlowInventory(QWidget):
         elif tab_name == "sales":
             activate_card(self.card_sales, "#10B981", "rgba(16,185,129,0.25)")
             self.table_title.setText("Sales Records")
-            self.table.setColumnCount(6)
-            self.table.setHorizontalHeaderLabels(
-                ["DATE", "CUSTOMER NAME", "SHOP NAME", "PRODUCT SIZE", "QUANTITY", "TOTAL AMOUNT"])
+            self._set_table_headers(
+                ["DATE", "CUSTOMER NAME", "CUSTOMER NUMBER", "SHOP NAME", "PRODUCT SIZE", "QUANTITY", "TOTAL AMOUNT", "RECORDED BY"]
+            )
             self.entry_title.setText("Record Sale")
             self.entry_stack.setCurrentIndex(0)
             self._style_entry_panel("#10B981")
 
         self.refresh_table()
+
+    # Every column — header and data alike — is centered, like a plain
+    # spreadsheet-style table: the header sits directly above its column's
+    # values regardless of column width.
+    ALIGN_CENTER = Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+
+    def _set_table_headers(self, labels):
+        """Set header labels, all centered, matching the centered data cells."""
+        self.table.setColumnCount(len(labels))
+        for col_idx, label in enumerate(labels):
+            header_item = QTableWidgetItem(label)
+            header_item.setTextAlignment(self.ALIGN_CENTER)
+            self.table.setHorizontalHeaderItem(col_idx, header_item)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
     # ── Search / filter ───────────────────────────────────────────────────────
     def filter_table(self, query):
@@ -1322,6 +1430,7 @@ class BlockFlowInventory(QWidget):
                 for item in data:
                     date_val = str(item.get("sale_date") or "N/A")
                     cust = str(item.get("customer_name") or "N/A")
+                    cust_number = str(item.get("customer_number") or "N/A")
                     shop = str(item.get("shop_name") or "N/A")
                     size = str(item.get("block_size") or "L (Large)")
                     try:
@@ -1332,7 +1441,8 @@ class BlockFlowInventory(QWidget):
                     if total_calc <= 0:
                         unit_price = 8.0 if "XL" in size.upper() else 7.0
                         total_calc = qty_num * unit_price
-                    loaded.append([date_val, cust, shop, size, f"{qty_num:,} pcs", f"₱{total_calc:,.0f}"])
+                    recorded_by = format_recorded_by(item.get("recorded_by"))
+                    loaded.append([date_val, cust, cust_number, shop, size, f"{qty_num:,} pcs", f"₱{total_calc:,.0f}", recorded_by])
                 self.sales_records = loaded
             except Exception as e:
                 print(f"Sales JSON parse error: {e}")
@@ -1361,7 +1471,8 @@ class BlockFlowInventory(QWidget):
                         amt = float(item.get("amount", 0))
                     except (ValueError, TypeError):
                         amt = 0.0
-                    loaded.append([date_val, cat, desc, f"₱{amt:,.2f}"])
+                    recorded_by = format_recorded_by(item.get("recorded_by"))
+                    loaded.append([date_val, cat, desc, f"₱{amt:,.2f}", recorded_by])
                 self.expense_records = loaded
             except Exception as e:
                 print(f"Expense JSON parse error: {e}")
@@ -1390,7 +1501,8 @@ class BlockFlowInventory(QWidget):
                         qty = 0
                     unit = item.get("unit", "pcs")
                     date_added = item.get("date_added", "N/A")
-                    loaded.append([size, str(qty), unit, date_added])
+                    recorded_by = format_recorded_by(item.get("recorded_by"))
+                    loaded.append([size, f"{qty:,}", unit, date_added, recorded_by])
                 self.inventory_records = loaded
             except Exception as e:
                 print(f"Inventory JSON parse error: {e}")
@@ -1417,51 +1529,52 @@ class BlockFlowInventory(QWidget):
 
                 is_amount_col = (
                     (self.current_tab == "expenses" and col_idx == 3) or
-                    (self.current_tab == "sales" and col_idx == 5)
+                    (self.current_tab == "sales" and col_idx == 6)
                 )
                 if is_amount_col:
                     item.setForeground(QColor("#34D399") if self.current_tab == "sales" else QColor("#F87171"))
-                    item.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                else:
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                    item.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+                item.setTextAlignment(self.ALIGN_CENTER)
 
                 self.table.setItem(row_idx, col_idx, item)
 
     # ── Modal launchers ───────────────────────────────────────────────────────
     def open_record_sales_modal(self):
-        dialog = RecordSalesDialog(self)
+        dialog = RecordSalesDialog(self, user_role=self.user_role)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             data = dialog.get_data()
             payload = json.dumps(data).encode('utf-8')
             request = QNetworkRequest(QUrl(f"{BASE_API_URL}/sales"))
             request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+            request.setRawHeader(b"X-BlockFlow-Role", self.user_role.encode("utf-8"))
             reply = self.network_manager.post(request, payload)
             reply.finished.connect(lambda: self._on_post_done(reply, self.fetch_sales_async))
 
     def open_record_expense_modal(self):
-        dialog = RecordExpenseDialog(self)
+        dialog = RecordExpenseDialog(self, user_role=self.user_role)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             data = dialog.get_data()
             payload = json.dumps(data).encode('utf-8')
             request = QNetworkRequest(QUrl(f"{BASE_API_URL}/expenses"))
             request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+            request.setRawHeader(b"X-BlockFlow-Role", self.user_role.encode("utf-8"))
             reply = self.network_manager.post(request, payload)
             reply.finished.connect(lambda: self._on_post_done(reply, self.fetch_expenses_async))
 
     def open_record_stock_modal(self):
-        dialog = RecordStockDialog(self)
+        dialog = RecordStockDialog(self, user_role=self.user_role)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             data = dialog.get_data()
             payload = json.dumps(data).encode('utf-8')
             request = QNetworkRequest(QUrl(f"{BASE_API_URL}/inventory"))
             request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+            request.setRawHeader(b"X-BlockFlow-Role", self.user_role.encode("utf-8"))
             reply = self.network_manager.post(request, payload)
             reply.finished.connect(lambda: self._on_post_done(reply, self.fetch_inventory_async))
 
     def _on_post_done(self, reply: QNetworkReply, refresh_fn, clear_fn=None, success_extra=None):
         if reply.error() != QNetworkReply.NetworkError.NoError:
-            QMessageBox.critical(self, "Save Failed", reply.errorString())
+            show_critical(self, "Save Failed", reply.errorString())
         else:
             raw_body = bytes(reply.readAll()).decode("utf-8", errors="replace")
             try:
@@ -1472,7 +1585,7 @@ class BlockFlowInventory(QWidget):
                 200,
                 201,
             ):
-                QMessageBox.warning(
+                show_warning(
                     self,
                     "Save Failed",
                     response_data.get("detail", "The server rejected this record."),
@@ -1518,13 +1631,20 @@ class BlockFlowInventory(QWidget):
             pass
 
     def handle_logout(self):
+        if getattr(self, "_logging_out", False):
+            return
+        self._logging_out = True
+        from session_nav import invalidate_auth_flow
+
+        invalidate_auth_flow()
         try:
             from login_view import BlockFlowLogin
+
             self.login_window = BlockFlowLogin()
             self.login_window.show()
             self.close()
         except ImportError:
-            pass
+            self._logging_out = False
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

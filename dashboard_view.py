@@ -44,7 +44,7 @@ class MonthlyDetailsDialog(BlurredDialog):
                 color: #E2E8F0;
                 border: none;
                 border-radius: 10px;
-                font-size: 13px;
+                font-size: 16px;
             }
             QTableWidget::item { padding: 6px 12px; border: none; }
             QTableWidget::item:selected { background-color: rgba(59,130,246,0.15); }
@@ -53,7 +53,7 @@ class MonthlyDetailsDialog(BlurredDialog):
                 color: #AAB8CA;
                 padding: 12px;
                 font-weight: bold;
-                font-size: 11px;
+                font-size: 14px;
                 letter-spacing: 1px;
                 border: none;
                 border-bottom: 1px solid rgba(255,255,255,10);
@@ -85,10 +85,10 @@ class MonthlyDetailsDialog(BlurredDialog):
         title_col = QVBoxLayout()
         title_col.setSpacing(3)
         title_label = QLabel(f"Transactions — {self.month_name}")
-        title_label.setFont(QFont("Segoe UI", 17, QFont.Weight.Bold))
+        title_label.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
         title_label.setStyleSheet("color: #F8FAFC;")
         count_label = QLabel(f"{len(self.transactions)} total record(s)")
-        count_label.setStyleSheet("color: #AAB8CA; font-size: 12px;")
+        count_label.setStyleSheet("color: #AAB8CA; font-size: 15px;")
         title_col.addWidget(title_label)
         title_col.addWidget(count_label)
 
@@ -98,7 +98,7 @@ class MonthlyDetailsDialog(BlurredDialog):
             QPushButton {
                 background-color: rgba(255,255,255,8);
                 color: #94A3B8; border: none;
-                border-radius: 8px; font-size: 14px; font-weight: bold;
+                border-radius: 8px; font-size: 17px; font-weight: bold;
             }
             QPushButton:hover { background-color: rgba(239,68,68,0.2); color: #F87171; }
         """)
@@ -129,7 +129,7 @@ class MonthlyDetailsDialog(BlurredDialog):
 
     def populate_table(self):
         self.table.setRowCount(len(self.transactions))
-        self.table.verticalHeader().setDefaultSectionSize(46)
+        self.table.verticalHeader().setDefaultSectionSize(54)
 
         for row_idx, tx in enumerate(self.transactions):
             date_item = QTableWidgetItem(tx.get("date", "N/A"))
@@ -162,7 +162,7 @@ class MonthlyDetailsDialog(BlurredDialog):
                 amt_item.setForeground(QColor("#34D399"))
                 type_item.setForeground(QColor("#34D399"))
 
-            amt_item.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            amt_item.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
             amt_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row_idx, 3, amt_item)
 
@@ -232,7 +232,7 @@ class ReceiptDialog(BlurredDialog):
 
         header_row = QHBoxLayout()
         title = QLabel("Transaction Receipt")
-        title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         title.setStyleSheet("color: #F1F5F9;")
         close_btn = QPushButton("✕")
         close_btn.setFixedSize(30, 30)
@@ -241,7 +241,7 @@ class ReceiptDialog(BlurredDialog):
             QPushButton {
                 background-color: rgba(255,255,255,8);
                 color: #94A3B8; border: none;
-                border-radius: 8px; font-size: 13px;
+                border-radius: 8px; font-size: 16px;
             }
             QPushButton:hover { background-color: rgba(239,68,68,0.2); color: #F87171; }
         """)
@@ -253,14 +253,14 @@ class ReceiptDialog(BlurredDialog):
         layout.addSpacing(14)
 
         badge = QLabel(type_label.upper())
-        badge.setFixedHeight(26)
+        badge.setFixedHeight(32)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setStyleSheet(f"""
             background-color: {accent}30;
             color: {accent};
             border: 1px solid {accent};
             border-radius: 13px;
-            font-size: 11px;
+            font-size: 14px;
             font-weight: bold;
             letter-spacing: 1px;
             padding: 0 14px;
@@ -273,13 +273,13 @@ class ReceiptDialog(BlurredDialog):
         layout.addSpacing(22)
 
         amt_label = QLabel(f"{sign}₱{abs(amt):,.2f}")
-        amt_label.setFont(QFont("Segoe UI", 30, QFont.Weight.Bold))
+        amt_label.setFont(QFont("Segoe UI", 33, QFont.Weight.Bold))
         amt_label.setStyleSheet(f"color: {accent};")
         amt_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(amt_label)
 
         sub_amt = QLabel("Total Amount")
-        sub_amt.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        sub_amt.setStyleSheet("color: #94A3B8; font-size: 14px;")
         sub_amt.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(sub_amt)
         layout.addSpacing(22)
@@ -294,10 +294,10 @@ class ReceiptDialog(BlurredDialog):
             row = QHBoxLayout()
             row.setSpacing(12)
             lbl = QLabel(label_text)
-            lbl.setStyleSheet("color: #94A3B8; font-size: 12px; font-weight: 600;")
+            lbl.setStyleSheet("color: #94A3B8; font-size: 15px; font-weight: 600;")
             lbl.setFixedWidth(110)
             val = QLabel(value_text)
-            val.setStyleSheet("color: #F1F5F9; font-size: 12px; font-weight: 600;")
+            val.setStyleSheet("color: #F1F5F9; font-size: 15px; font-weight: 600;")
             val.setAlignment(Qt.AlignmentFlag.AlignRight)
             val.setWordWrap(True)
             row.addWidget(lbl)
@@ -310,6 +310,9 @@ class ReceiptDialog(BlurredDialog):
             ("Date", str(self.txn.get("date") or "—")),
             ("Transaction ID", f"#{raw_id}" if raw_id is not None else "—"),
         ]
+        cust_number = str(self.txn.get("customer_number") or "").strip()
+        if cust_number:
+            details.insert(1, ("Phone Number", cust_number))
         for label_text, value_text in details:
             layout.addLayout(detail_row(label_text, value_text))
             layout.addSpacing(12)
@@ -323,7 +326,7 @@ class ReceiptDialog(BlurredDialog):
         layout.addSpacing(14)
 
         footer = QLabel("Magalin Hollow Blocks Trading")
-        footer.setStyleSheet("color: #64748B; font-size: 11px;")
+        footer.setStyleSheet("color: #64748B; font-size: 14px;")
         footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(footer)
 
@@ -427,6 +430,7 @@ class DashboardDataWorker(QThread):
                                 "amount": amount,
                                 "date": str(date_value),
                                 "timestamp": str(date_value),
+                                "customer_number": item.get("customer_number"),
                             })
         except Exception as e:
             print(f"[API] /api/history offline ({e})")
@@ -463,6 +467,7 @@ class DashboardDataWorker(QThread):
                         "amount": amount,
                         "date": str(date_value),
                         "timestamp": str(date_value),
+                        "customer_number": item.get("customer_number"),
                     })
         except Exception as e:
             if not history_loaded or not raw_transactions:
@@ -652,7 +657,7 @@ class AnalyticsLoaderWorker(QThread):
 class BlockFlowDashboard(QFrame):
     def __init__(self, role="owner"):
         super().__init__()
-        self.setFont(QFont("Segoe UI", 10))
+        self.setFont(QFont("Segoe UI", 13))
         self.user_role = str(role or "staff").strip().lower()
         self.is_admin = self.user_role in {"owner", "admin"}
         self.setWindowTitle("BlockFlow — Dashboard")
@@ -704,7 +709,7 @@ class BlockFlowDashboard(QFrame):
     # ── Nav button helper ────────────────────────────────────────────────────
     def _nav_button(self, text, active=False):
         btn = QPushButton(text)
-        btn.setFixedHeight(36)
+        btn.setFixedHeight(42)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         if active:
             btn.setStyleSheet("""
@@ -712,7 +717,7 @@ class BlockFlowDashboard(QFrame):
                     background-color: rgba(59,130,246,0.15);
                     color: #93C5FD; border: none;
                     border-radius: 8px; padding: 0 18px;
-                    font-size: 13px; font-weight: 700;
+                    font-size: 16px; font-weight: 700;
                 }
             """)
         else:
@@ -720,7 +725,7 @@ class BlockFlowDashboard(QFrame):
                 QPushButton {
                     background-color: transparent; color: #94A3B8;
                     border: none; border-radius: 8px;
-                    padding: 0 18px; font-size: 13px; font-weight: 600;
+                    padding: 0 18px; font-size: 16px; font-weight: 600;
                 }
                 QPushButton:hover {
                     background-color: rgba(255,255,255,6); color: #CBD5E1;
@@ -738,7 +743,7 @@ class BlockFlowDashboard(QFrame):
         # TOP NAV BAR
         # ══════════════════════════════════════════════════════════════
         nav_bar = QFrame()
-        nav_bar.setFixedHeight(68)
+        nav_bar.setFixedHeight(70)
         nav_bar.setObjectName("NavBar")
         nav_bar.setStyleSheet("""
             QFrame#NavBar {
@@ -782,7 +787,7 @@ class BlockFlowDashboard(QFrame):
         else:
             # Fallback if logo not found
             brand_badge.setText("BF")
-            brand_badge.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            brand_badge.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
             brand_badge.setStyleSheet("""
                 color: white;
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
@@ -794,10 +799,10 @@ class BlockFlowDashboard(QFrame):
         brand_text_col = QVBoxLayout()
         brand_text_col.setSpacing(0)
         brand_label = QLabel("BlockFlow")
-        brand_label.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        brand_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         brand_label.setStyleSheet("color: #F8FAFC; letter-spacing: 0.3px;")
         brand_sub = QLabel("BLOCKS TRADING")
-        brand_sub.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        brand_sub.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
         brand_sub.setStyleSheet("color: #64748B; letter-spacing: 1.4px;")
         brand_text_col.addWidget(brand_label)
         brand_text_col.addWidget(brand_sub)
@@ -829,7 +834,7 @@ class BlockFlowDashboard(QFrame):
 
         user_chip = QFrame()
         user_chip.setObjectName("UserChip")
-        user_chip.setFixedHeight(44)
+        user_chip.setFixedHeight(48)
         user_chip.setStyleSheet("""
             QFrame#UserChip {
                 background-color: rgba(30,41,59,150);
@@ -845,7 +850,7 @@ class BlockFlowDashboard(QFrame):
         avatar = QLabel("A" if self.is_admin else "S")
         avatar.setFixedSize(30, 30)
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        avatar.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        avatar.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         avatar.setStyleSheet("""
             color: white;
             background: qlineargradient(x1:0,y1:0,x2:1,y2:1, %s);
@@ -855,10 +860,10 @@ class BlockFlowDashboard(QFrame):
         role_col = QVBoxLayout()
         role_col.setSpacing(0)
         role_title = QLabel("Admin" if self.is_admin else "Staff")
-        role_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        role_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         role_title.setStyleSheet("color: #F1F5F9;")
         role_caption = QLabel("Full Access" if self.is_admin else "Limited Access")
-        role_caption.setFont(QFont("Segoe UI", 9, QFont.Weight.Medium))
+        role_caption.setFont(QFont("Segoe UI", 12, QFont.Weight.Medium))
         role_caption.setStyleSheet("color: %s;" % ("#93C5FD" if self.is_admin else "#5EEAD4"))
         role_col.addWidget(role_title)
         role_col.addWidget(role_caption)
@@ -867,7 +872,7 @@ class BlockFlowDashboard(QFrame):
         chip_layout.addLayout(role_col)
 
         btn_logout = QPushButton("Logout")
-        btn_logout.setFixedHeight(44)
+        btn_logout.setFixedHeight(48)
         btn_logout.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_logout.setStyleSheet("""
             QPushButton {
@@ -877,7 +882,7 @@ class BlockFlowDashboard(QFrame):
                 border-radius: 22px;
                 border: 1px solid rgba(239,68,68,0.30);
                 font-weight: 700;
-                font-size: 13px;
+                font-size: 16px;
             }
             QPushButton:hover {
                 background-color: rgba(239,68,68,0.85);
@@ -931,10 +936,10 @@ class BlockFlowDashboard(QFrame):
         title_col = QVBoxLayout()
         title_col.setSpacing(4)
         header_title = QLabel("Dashboard Overview")
-        header_title.setFont(QFont("Segoe UI", 26, QFont.Weight.Bold))
+        header_title.setFont(QFont("Segoe UI", 29, QFont.Weight.Bold))
         header_title.setStyleSheet("color: #F8FAFC;")
         sub_title = QLabel("Live business performance — Magalin Hollow Blocks Trading")
-        sub_title.setStyleSheet("color: #B8C5D6; font-size: 13px;")
+        sub_title.setStyleSheet("color: #B8C5D6; font-size: 16px;")
         title_col.addWidget(header_title)
         title_col.addWidget(sub_title)
         title_row.addLayout(title_col)
@@ -988,14 +993,14 @@ class BlockFlowDashboard(QFrame):
             icon_badge = QLabel(icon)
             icon_badge.setFixedSize(38, 38)
             icon_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            icon_badge.setFont(QFont("Segoe UI", 16))
+            icon_badge.setFont(QFont("Segoe UI", 19))
             icon_badge.setStyleSheet(f"background-color: {bg}; border-radius: 10px;")
             icon_row.addWidget(icon_badge)
             icon_row.addStretch()
             if filter_options is not None:
                 filter_box = QComboBox()
                 filter_box.setObjectName("MetricFilter")
-                filter_box.setFixedHeight(30)
+                filter_box.setFixedHeight(36)
                 filter_box.setMinimumWidth(92 if key == "current_stock" else 86)
                 filter_box.setStyleSheet("""
                     QComboBox#MetricFilter {
@@ -1004,7 +1009,7 @@ class BlockFlowDashboard(QFrame):
                         border: 1px solid rgba(255,255,255,18);
                         border-radius: 8px;
                         padding: 0 8px;
-                        font-size: 11px;
+                        font-size: 14px;
                         font-weight: 600;
                     }
                     QComboBox#MetricFilter:hover {
@@ -1021,6 +1026,11 @@ class BlockFlowDashboard(QFrame):
                         border: 1px solid rgba(255,255,255,18);
                         selection-background-color: #1E3A5F;
                         padding: 4px;
+                        outline: none;
+                    }
+                    QComboBox QAbstractItemView::item {
+                        padding: 8px 10px;
+                        min-height: 26px;
                     }
                 """)
                 for option_label, option_value in filter_options:
@@ -1035,7 +1045,7 @@ class BlockFlowDashboard(QFrame):
                 # Staff view: period is locked to "Daily" — show a static badge
                 # instead of a dropdown, no Weekly/Monthly option available.
                 static_badge = QLabel("Daily")
-                static_badge.setFixedHeight(30)
+                static_badge.setFixedHeight(36)
                 static_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 static_badge.setStyleSheet("""
                     color: #94A3B8;
@@ -1043,7 +1053,7 @@ class BlockFlowDashboard(QFrame):
                     border: 1px solid rgba(255,255,255,12);
                     border-radius: 8px;
                     padding: 0 10px;
-                    font-size: 11px;
+                    font-size: 14px;
                     font-weight: 600;
                 """)
                 icon_row.addWidget(static_badge)
@@ -1052,18 +1062,18 @@ class BlockFlowDashboard(QFrame):
 
             lbl_title = QLabel(title)
             lbl_title.setStyleSheet(
-                "color: #C0CCDA; font-size: 12px; font-weight: 600; letter-spacing: 0.5px;")
+                "color: #C0CCDA; font-size: 15px; font-weight: 600; letter-spacing: 0.5px;")
             box_layout.addWidget(lbl_title)
             self.metric_titles[key] = lbl_title
 
             val_lbl = QLabel("—")
-            val_lbl.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
+            val_lbl.setFont(QFont("Segoe UI", 27, QFont.Weight.Bold))
             val_lbl.setStyleSheet("color: #F1F5F9;")
             box_layout.addWidget(val_lbl)
             self.metric_values[key] = val_lbl
 
             lbl_sub = QLabel(sub)
-            lbl_sub.setStyleSheet("color: #9EADBF; font-size: 11px;")
+            lbl_sub.setStyleSheet("color: #9EADBF; font-size: 14px;")
             box_layout.addWidget(lbl_sub)
             self.metric_subtitles[key] = lbl_sub
 
@@ -1089,15 +1099,15 @@ class BlockFlowDashboard(QFrame):
         left_header = QVBoxLayout()
         left_header.setSpacing(3)
         title_text = QLabel("Transaction History")
-        title_text.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        title_text.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         title_text.setStyleSheet("color: #F1F5F9;")
         sub_desc_text = QLabel("Monthly summaries — click a card to view details")
-        sub_desc_text.setStyleSheet("color: #AAB8CA; font-size: 11px;")
+        sub_desc_text.setStyleSheet("color: #AAB8CA; font-size: 14px;")
         left_header.addWidget(title_text)
         left_header.addWidget(sub_desc_text)
 
         self.calendar_toggle_btn = QPushButton("View Calendar")
-        self.calendar_toggle_btn.setFixedHeight(36)
+        self.calendar_toggle_btn.setFixedHeight(42)
         self.calendar_toggle_btn.setStyleSheet("""
             QPushButton {
                 background-color: rgba(139,92,246,0.15);
@@ -1105,7 +1115,7 @@ class BlockFlowDashboard(QFrame):
                 border: 1px solid rgba(139,92,246,0.3);
                 border-radius: 10px;
                 padding: 0 18px;
-                font-size: 13px;
+                font-size: 16px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -1153,10 +1163,10 @@ class BlockFlowDashboard(QFrame):
         left_header_col = QVBoxLayout()
         left_header_col.setSpacing(3)
         left_title = QLabel("Stock Alerts")
-        left_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        left_title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         left_title.setStyleSheet("color: #F1F5F9;")
         left_sub = QLabel("Items below threshold")
-        left_sub.setStyleSheet("color: #AAB8CA; font-size: 11px;")
+        left_sub.setStyleSheet("color: #AAB8CA; font-size: 14px;")
         left_header_col.addWidget(left_title)
         left_header_col.addWidget(left_sub)
         left_header_row.addLayout(left_header_col)
@@ -1185,10 +1195,10 @@ class BlockFlowDashboard(QFrame):
         right_header_col = QVBoxLayout()
         right_header_col.setSpacing(3)
         right_title = QLabel("Recent Transactions")
-        right_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        right_title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         right_title.setStyleSheet("color: #F1F5F9;")
         right_sub = QLabel("Latest 5 activity records")
-        right_sub.setStyleSheet("color: #AAB8CA; font-size: 11px;")
+        right_sub.setStyleSheet("color: #AAB8CA; font-size: 14px;")
         right_header_col.addWidget(right_title)
         right_header_col.addWidget(right_sub)
         self.right_panel_layout.addLayout(right_header_col)
@@ -1243,7 +1253,7 @@ class BlockFlowDashboard(QFrame):
             ok_layout = QHBoxLayout(ok_frame)
             ok_layout.setContentsMargins(16, 12, 16, 12)
             ok_text = QLabel("All stock levels are healthy")
-            ok_text.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+            ok_text.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
             ok_text.setStyleSheet("color: #34D399; border: none; background: transparent;")
             ok_layout.addWidget(ok_text)
             self.alerts_container.addWidget(ok_frame)
@@ -1260,7 +1270,7 @@ class BlockFlowDashboard(QFrame):
                 al.setContentsMargins(14, 10, 14, 10)
                 al_text = QLabel(f"Low Stock: {alert}")
                 al_text.setStyleSheet(
-                    "color: #F87171; font-size: 13px; font-weight: 600; "
+                    "color: #F87171; font-size: 16px; font-weight: 600; "
                     "border: none; background: transparent;")
                 al.addWidget(al_text)
                 self.alerts_container.addWidget(alert_frame)
@@ -1273,7 +1283,7 @@ class BlockFlowDashboard(QFrame):
 
         if not data["recent_transactions"]:
             no_lbl = QLabel("No transactions found yet.")
-            no_lbl.setStyleSheet("color: #AAB8CA; font-size: 13px; padding: 8px 0;")
+            no_lbl.setStyleSheet("color: #AAB8CA; font-size: 16px; padding: 8px 0;")
             self.transactions_container.addWidget(no_lbl)
         else:
             for txn in data["recent_transactions"][:5]:
@@ -1310,16 +1320,16 @@ class BlockFlowDashboard(QFrame):
                 desc_col.setSpacing(2)
                 desc_lbl = QLabel(txn.get("description", "Transaction"))
                 desc_lbl.setStyleSheet(
-                    "color: #CBD5E1; font-size: 13px; font-weight: 600; "
+                    "color: #CBD5E1; font-size: 16px; font-weight: 600; "
                     "border: none; background: transparent;")
                 date_lbl = QLabel(txn.get("date", ""))
                 date_lbl.setStyleSheet(
-                    "color: #9EADBF; font-size: 11px; border: none; background: transparent;")
+                    "color: #9EADBF; font-size: 14px; border: none; background: transparent;")
                 desc_col.addWidget(desc_lbl)
                 desc_col.addWidget(date_lbl)
 
                 amt_lbl = QLabel(f"{prefix}₱{abs(amt):,.0f}")
-                amt_lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+                amt_lbl.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
                 amt_lbl.setStyleSheet(
                     f"color: {color}; border: none; background: transparent;")
                 amt_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -1389,7 +1399,7 @@ class BlockFlowDashboard(QFrame):
             )
             value_label.setStyleSheet(
                 f"color: {'#34D399' if value >= 0 else '#F87171'}; "
-                "font-size: 24px; font-weight: bold;"
+                "font-size: 27px; font-weight: bold;"
             )
 
         # Monthly history calendar
@@ -1422,23 +1432,23 @@ class BlockFlowDashboard(QFrame):
             card_layout.setSpacing(6)
 
             month_lbl = QLabel(month_data["month"])
-            month_lbl.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+            month_lbl.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
             month_lbl.setStyleSheet("color: #F1F5F9;")
 
             txn_lbl = QLabel(month_data["tx_count"])
-            txn_lbl.setStyleSheet("color: #9EADBF; font-size: 11px;")
+            txn_lbl.setStyleSheet("color: #9EADBF; font-size: 14px;")
 
             row2 = QHBoxLayout()
             sales_lbl = QLabel(f"↑ {month_data['sales']}")
-            sales_lbl.setStyleSheet("color: #34D399; font-size: 12px; font-weight: 600;")
+            sales_lbl.setStyleSheet("color: #34D399; font-size: 15px; font-weight: 600;")
             exp_lbl = QLabel(f"↓ {month_data['expenses']}")
-            exp_lbl.setStyleSheet("color: #F87171; font-size: 12px; font-weight: 600;")
+            exp_lbl.setStyleSheet("color: #F87171; font-size: 15px; font-weight: 600;")
             row2.addWidget(sales_lbl)
             row2.addStretch()
             row2.addWidget(exp_lbl)
 
             net_lbl_card = QLabel(f"Net: {month_data['net']}")
-            net_lbl_card.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+            net_lbl_card.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
             net_lbl_card.setStyleSheet(f"color: {card_color};")
 
             card_layout.addWidget(month_lbl)
@@ -1530,13 +1540,20 @@ class BlockFlowDashboard(QFrame):
             self.analytics_loading.close()
 
     def handle_logout(self):
+        if getattr(self, "_logging_out", False):
+            return
+        self._logging_out = True
+        from session_nav import invalidate_auth_flow
+
+        invalidate_auth_flow()
         try:
             from login_view import BlockFlowLogin
+
             self.login_window = BlockFlowLogin()
             self.login_window.show()
             self.close()
         except ImportError:
-            pass
+            self._logging_out = False
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

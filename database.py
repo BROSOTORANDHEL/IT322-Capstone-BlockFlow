@@ -49,7 +49,13 @@ def _now() -> str:
 
 def _normalise_role(role: str | None) -> str:
     value = (role or "staff").strip().lower()
-    return "owner" if value in {"owner", "admin", "admin / owner"} else "staff"
+    return "owner" if value in {"owner", "admin", "admin / owner", "admin/owner"} else "staff"
+
+
+def _normalise_recorded_by(value: str | None) -> str:
+    """Store one canonical value for the role that created a record."""
+    clean = (value or "staff").strip().lower()
+    return "owner" if clean in {"owner", "admin", "admin / owner", "admin/owner"} else "staff"
 
 
 def _normalise_size(size: str | None) -> str:
@@ -104,18 +110,21 @@ def ensure_schema_integrity() -> None:
                 low_stock_threshold INTEGER NOT NULL DEFAULT 100,
                 date_recorded TEXT,
                 date_added TEXT,
+                recorded_by TEXT NOT NULL DEFAULT 'staff',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS sales (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 customer_name TEXT NOT NULL,
+                customer_number TEXT NOT NULL DEFAULT '',
                 shop_name TEXT NOT NULL,
                 block_size TEXT NOT NULL,
                 quantity INTEGER NOT NULL CHECK (quantity > 0),
                 unit_price REAL NOT NULL DEFAULT 0,
                 total_amount REAL NOT NULL DEFAULT 0,
                 sale_date TEXT NOT NULL,
+                recorded_by TEXT NOT NULL DEFAULT 'staff',
                 date_logged TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -125,6 +134,7 @@ def ensure_schema_integrity() -> None:
                 description TEXT NOT NULL,
                 amount REAL NOT NULL CHECK (amount > 0),
                 date_recorded TEXT NOT NULL,
+                recorded_by TEXT NOT NULL DEFAULT 'staff',
                 date_logged TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -137,6 +147,21 @@ def ensure_schema_integrity() -> None:
                 source_id INTEGER,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS ai_insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                prompt_hash TEXT NOT NULL UNIQUE,
+                prompt TEXT NOT NULL,
+                insight_text TEXT NOT NULL,
+                view_type TEXT NOT NULL,
+                metric_period TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                usage_count INTEGER NOT NULL DEFAULT 1
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ai_insights_prompt_hash ON ai_insights(prompt_hash);
+            CREATE INDEX IF NOT EXISTS idx_ai_insights_view_type ON ai_insights(view_type);
             """
         )
 
@@ -151,6 +176,7 @@ def ensure_schema_integrity() -> None:
             ("low_stock_threshold", "INTEGER NOT NULL DEFAULT 100"),
             ("date_added", "TEXT"),
             ("date_recorded", "TEXT"),
+            ("recorded_by", "TEXT NOT NULL DEFAULT 'staff'"),
             ("created_at", "TEXT"),
         ):
             _ensure_column(conn, "inventory", column, definition)
@@ -158,8 +184,15 @@ def ensure_schema_integrity() -> None:
             ("unit_price", "REAL NOT NULL DEFAULT 0"),
             ("total_amount", "REAL NOT NULL DEFAULT 0"),
             ("date_logged", "TEXT"),
+            ("customer_number", "TEXT NOT NULL DEFAULT ''"),
+            ("recorded_by", "TEXT NOT NULL DEFAULT 'staff'"),
         ):
             _ensure_column(conn, "sales", column, definition)
+        for column, definition in (
+            ("recorded_by", "TEXT NOT NULL DEFAULT 'staff'"),
+            ("date_logged", "TEXT"),
+        ):
+            _ensure_column(conn, "expenses", column, definition)
 
         # Older databases may have an expenses table with different names.
         # Copy legacy values into the current fields when those fields exist.
@@ -211,6 +244,28 @@ def ensure_schema_integrity() -> None:
         conn.execute(
             "UPDATE inventory SET date_recorded = COALESCE(date_recorded, date_added, ?)",
             (_today(),),
+        )
+        # Existing databases may have gained recorded_by after their first
+        # creation. Normalize every stored value so the UI never sees an
+        # empty/legacy role. New writes still receive the actual logged-in
+        # role from the desktop client.
+        conn.execute(
+            "UPDATE inventory SET recorded_by = CASE "
+            "WHEN LOWER(TRIM(COALESCE(recorded_by, ''))) IN "
+            "('owner','admin','admin / owner','admin/owner') THEN 'owner' "
+            "ELSE 'staff' END"
+        )
+        conn.execute(
+            "UPDATE sales SET recorded_by = CASE "
+            "WHEN LOWER(TRIM(COALESCE(recorded_by, ''))) IN "
+            "('owner','admin','admin / owner','admin/owner') THEN 'owner' "
+            "ELSE 'staff' END"
+        )
+        conn.execute(
+            "UPDATE expenses SET recorded_by = CASE "
+            "WHEN LOWER(TRIM(COALESCE(recorded_by, ''))) IN "
+            "('owner','admin','admin / owner','admin/owner') THEN 'owner' "
+            "ELSE 'staff' END"
         )
         conn.execute(
             """
@@ -344,6 +399,7 @@ def record_new_stock(
     date_added: str | None,
     size: str = "None",
     unit: str = "pcs",
+    recorded_by: str = "staff",
 ) -> int:
     ensure_schema_integrity()
     quantity = int(quantity)
@@ -355,13 +411,14 @@ def record_new_stock(
     recorded_date = _today(date_added)
     clean_size = _normalise_size(size)
     clean_unit = unit.strip() or "pcs"
+    clean_recorded_by = _normalise_recorded_by(recorded_by)
     with get_db_connection() as conn:
         cursor = conn.execute(
             """
             INSERT INTO inventory
                 (item_name, quantity, size, unit, price, low_stock_threshold,
-                 date_added, date_recorded)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 date_added, date_recorded, recorded_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 HOLLOWBLOCKS_ITEM_NAME,
@@ -372,6 +429,7 @@ def record_new_stock(
                 LOW_STOCK_ALERT_THRESHOLD,
                 recorded_date,
                 recorded_date,
+                clean_recorded_by,
             ),
         )
         inventory_id = cursor.lastrowid
@@ -392,17 +450,23 @@ def record_new_stock(
 
 def record_sale(
     customer_name: str,
+    customer_number: str,
     shop_name: str,
     block_size: str,
     quantity: int,
     sale_date: str | None,
+    recorded_by: str = "staff",
 ) -> int:
     ensure_schema_integrity()
     customer_name = customer_name.strip()
+    customer_number = (customer_number or "").strip()
     shop_name = shop_name.strip()
     quantity = int(quantity)
+    clean_recorded_by = _normalise_recorded_by(recorded_by)
     if not customer_name or not shop_name:
         raise ValueError("Customer and shop names are required")
+    if not customer_number:
+        raise ValueError("Customer number is required")
     if quantity <= 0:
         raise ValueError("Quantity must be greater than zero")
 
@@ -443,12 +507,13 @@ def record_sale(
         cursor = conn.execute(
             """
             INSERT INTO sales
-                (customer_name, shop_name, block_size, quantity, unit_price,
-                 total_amount, sale_date, date_logged)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (customer_name, customer_number, shop_name, block_size, quantity,
+                 unit_price, total_amount, sale_date, date_logged, recorded_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 customer_name,
+                customer_number,
                 shop_name,
                 clean_size,
                 quantity,
@@ -456,6 +521,7 @@ def record_sale(
                 total_amount,
                 recorded_date,
                 _now(),
+                clean_recorded_by,
             ),
         )
         sale_id = cursor.lastrowid
@@ -475,7 +541,11 @@ def record_sale(
 
 
 def record_expense(
-    expense_name: str, amount: float, category: str, date_added: str | None
+    expense_name: str,
+    amount: float,
+    category: str,
+    date_added: str | None,
+    recorded_by: str = "staff",
 ) -> int:
     ensure_schema_integrity()
     description = expense_name.strip()
@@ -486,13 +556,14 @@ def record_expense(
     if amount <= 0:
         raise ValueError("Expense amount must be greater than zero")
     recorded_date = _today(date_added)
+    clean_recorded_by = _normalise_recorded_by(recorded_by)
     with get_db_connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO expenses (category, description, amount, date_recorded, date_logged)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO expenses (category, description, amount, date_recorded, date_logged, recorded_by)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (category, description, amount, recorded_date, _now()),
+            (category, description, amount, recorded_date, _now(), clean_recorded_by),
         )
         expense_id = cursor.lastrowid
         conn.execute(
@@ -510,7 +581,7 @@ def get_all_expenses() -> list[dict[str, Any]]:
     with get_db_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, category, description, amount, date_recorded
+            SELECT id, category, description, amount, date_recorded, recorded_by
             FROM expenses ORDER BY date_recorded DESC, id DESC
             """
         ).fetchall()
@@ -523,7 +594,7 @@ def get_all_inventory() -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT id, item_name, size, quantity, unit, price,
-                   date_added, date_recorded
+                   date_added, date_recorded, recorded_by
             FROM inventory ORDER BY id DESC
             """
         ).fetchall()
@@ -535,8 +606,8 @@ def get_all_sales() -> list[dict[str, Any]]:
     with get_db_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, customer_name, shop_name, block_size, quantity,
-                   unit_price, total_amount, sale_date
+            SELECT id, customer_name, customer_number, shop_name, block_size, quantity,
+                   unit_price, total_amount, sale_date, recorded_by
             FROM sales ORDER BY sale_date DESC, id DESC
             """
         ).fetchall()
@@ -546,11 +617,15 @@ def get_all_sales() -> list[dict[str, Any]]:
 def get_transaction_history() -> list[dict[str, Any]]:
     ensure_schema_integrity()
     with get_db_connection() as conn:
+        # LEFT JOIN sales via source_id so sale-type transactions can carry
+        # the customer's phone/contact number through to the receipt view.
         rows = conn.execute(
             """
-            SELECT id, title, amount, type, date_record
-            FROM transactions
-            ORDER BY id DESC
+            SELECT t.id, t.title, t.amount, t.type, t.date_record,
+                   s.customer_number AS customer_number
+            FROM transactions t
+            LEFT JOIN sales s ON t.type = 'sale' AND s.id = t.source_id
+            ORDER BY t.id DESC
             """
         ).fetchall()
     return [
@@ -561,6 +636,7 @@ def get_transaction_history() -> list[dict[str, Any]]:
             "amount": row["amount"],
             "type": row["type"],
             "date": row["date_record"],
+            "customer_number": row["customer_number"],
         }
         for row in rows
     ]
