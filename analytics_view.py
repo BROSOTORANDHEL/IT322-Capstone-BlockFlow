@@ -4,7 +4,9 @@ from __future__ import annotations
 from Handlers.ai_handler import get_ai_insight
 
 import csv
+import html
 import os
+import re
 import sys
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -217,6 +219,57 @@ def _autoregressive_forecast(values: list[float]) -> float:
     return max(0.0, estimate)
 
 # ============================================================
+# AI INSIGHT TEXT FORMATTING
+# ============================================================
+_SECTION_HEADING_RE = re.compile(r"^(section\s*\d+[:.]?\s*.*)$", re.IGNORECASE)
+
+
+def _format_ai_insight_html(response_text: str) -> str:
+    """Turn the AI's plain-text response into readable, well-spaced rich text.
+
+    Splits the response into paragraphs, renders lines like "Section 1: ..."
+    as bold, colored headings, and uses generous line-height/spacing so the
+    text is comfortable to read inside the scrollable insights panel.
+    """
+    text = (response_text or "").strip()
+    if not text:
+        return ""
+
+    blocks = re.split(r"\n\s*\n", text)
+    html_parts: list[str] = []
+
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+
+        lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        if not lines:
+            continue
+
+        heading_match = _SECTION_HEADING_RE.match(lines[0])
+        if heading_match:
+            heading_text = html.escape(heading_match.group(1))
+            html_parts.append(
+                f'<p style="margin:0 0 6px 0; padding-top:{"4px" if html_parts else "0"};'
+                f' font-size:18px; font-weight:700; color:#C7D2FE;'
+                f' letter-spacing:0.2px;">{heading_text}</p>'
+            )
+            remaining_lines = lines[1:]
+        else:
+            remaining_lines = lines
+
+        if remaining_lines:
+            paragraph_text = html.escape(" ".join(remaining_lines))
+            html_parts.append(
+                f'<p style="margin:0 0 16px 0; font-size:17px; line-height:170%;'
+                f' color:#E7E9FF;">{paragraph_text}</p>'
+            )
+
+    return "".join(html_parts) if html_parts else html.escape(text)
+
+
+# ============================================================
 # SALES LINE CHART
 # ============================================================
 class SalesLineChart(QWidget):
@@ -299,7 +352,7 @@ class SalesLineChart(QWidget):
             y = chart.top() + chart.height() * row / num_grid_lines
             painter.drawLine(int(chart.left()), int(y), int(chart.right()), int(y))
 
-        painter.setFont(QFont("Segoe UI", 8))
+        painter.setFont(QFont("Segoe UI", 11))
         painter.setPen(QColor(MUTED))
         for row in range(num_grid_lines + 1):
             value = scale_max * (num_grid_lines - row) / num_grid_lines
@@ -330,7 +383,7 @@ class SalesLineChart(QWidget):
             painter.drawLine(int(chart.left()), int(target_y), int(chart.right()), int(target_y))
 
             label = f"Target ₱{self.target:,.0f}"
-            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            painter.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
             text_w = painter.fontMetrics().horizontalAdvance(label) + 14
             label_above = (target_y - chart.top()) > 22
             chip_y = target_y - 20 if label_above else target_y + 5
@@ -360,7 +413,7 @@ class SalesLineChart(QWidget):
             for first, second in zip(expense_points, expense_points[1:]):
                 painter.drawLine(int(first[0]), int(first[1]), int(second[0]), int(second[1]))
 
-            painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+            painter.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
             for (x, y), item in zip(expense_points, self.expenses):
                 painter.setBrush(QColor("#0B1120"))
                 painter.setPen(QPen(QColor(self.RED), 2))
@@ -391,14 +444,14 @@ class SalesLineChart(QWidget):
             value = float(item["value"])
             if value > 0:
                 text = f"₱{value:,.0f}"
-                painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+                painter.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
                 text_w = painter.fontMetrics().horizontalAdvance(text) + 10
                 above_ok = (y - chart.top()) > 26
                 label_y = y - 24 if above_ok else y + 9
                 self._chip(painter, QRectF(x - text_w / 2, label_y, text_w, 17), text, QColor("#93C5FD"))
 
             if len(self.series) <= 8 or index in {0, len(self.series) - 1}:
-                painter.setFont(QFont("Segoe UI", 8))
+                painter.setFont(QFont("Segoe UI", 11))
                 painter.setPen(QColor(MUTED))
                 painter.drawText(
                     QRectF(x - 55, chart.bottom() + 10, 110, 20),
@@ -412,7 +465,7 @@ class SalesLineChart(QWidget):
             legend_items.append((self.RED, "Expenses"))
         if self.target:
             legend_items.append((self.AMBER, "Target"))
-        painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        painter.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         legend_x = chart.right()
         legend_y = 14
         for color, label in reversed(legend_items):
@@ -423,7 +476,7 @@ class SalesLineChart(QWidget):
             legend_x -= 16
             painter.setBrush(QColor(color))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(int(legend_x), legend_y + 2, 9, 9)
+            painter.drawEllipse(int(legend_x), int(legend_y) + 2, 9, 9)
             legend_x -= 16
         painter.end()
 
@@ -563,12 +616,15 @@ class MatplotlibSalesChartDialog(BlurredDialog):
 class AIWorker(QThread):
     finished = pyqtSignal(str)
 
-    def __init__(self, prompt):
+    def __init__(self, prompt, view_type: str = "analytics", metric_period: str = None, force_refresh: bool = False):
         super().__init__()
         self.prompt = prompt
+        self.view_type = view_type
+        self.metric_period = metric_period
+        self.force_refresh = force_refresh
 
     def run(self):
-        result = get_ai_insight(self.prompt)
+        result = get_ai_insight(self.prompt, view_type=self.view_type, metric_period=self.metric_period, force_refresh=self.force_refresh)
         self.finished.emit(result)
 
 # ============================================================
@@ -581,7 +637,8 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         self.period = "monthly"
         self.series: list[dict[str, Any]] = []
         self.setWindowTitle("Sales Analytics Report")
-        self.setMinimumSize(860, 840)
+        self.setMinimumSize(1500, 880)
+        self.resize(1600, 920)
         
         self.setStyleSheet("""
             QDialog { background: #080D1A; color: #F8FAFC; border: 1px solid rgba(255,255,255,18); }
@@ -594,7 +651,7 @@ class SalesAnalyticsReportDialog(BlurredDialog):
 
         header = QHBoxLayout()
         title = QLabel("Sales Analytics Report")
-        title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        title.setFont(QFont("Segoe UI", 21, QFont.Weight.Bold))
         header.addWidget(title)
         header.addStretch()
         close = QPushButton("✕")
@@ -617,19 +674,29 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         period_row.addStretch()
         layout.addLayout(period_row)
 
+        # Landscape body: chart & summary cards on the left, AI insights on the right
+        body_row = QHBoxLayout()
+        body_row.setSpacing(20)
+
+        # ---- Left column: chart + stat chips + summary cards ----
+        left_col = QVBoxLayout()
+        left_col.setSpacing(14)
+
         self.chart_title = QLabel()
-        self.chart_title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
-        layout.addWidget(self.chart_title)
+        self.chart_title.setFont(QFont("Segoe UI", 17, QFont.Weight.Bold))
+        left_col.addWidget(self.chart_title)
 
         self.chart = SalesLineChart()
-        layout.addWidget(self.chart)
-        layout.addSpacing(18)
+        self.chart.setMaximumHeight(16777215)  # let it grow in the report dialog (no cap)
+        self.chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        left_col.addWidget(self.chart, 1)
+        left_col.addSpacing(4)
 
         peak_row = QHBoxLayout()
         peak_row.setSpacing(8)
         self.peak = self._stat_chip(peak_row, "🏆", "Peak Period", "#60A5FA")
         self.target_chip = self._stat_chip(peak_row, "🎯", "Target / Period", "#FBBF24")
-        layout.addLayout(peak_row)
+        left_col.addLayout(peak_row)
 
         summary_row = QHBoxLayout()
         summary_row.setSpacing(8)
@@ -638,30 +705,42 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         self.net_total = self._summary_card(summary_row, "Net Profit", "#FBBF24")
         self.average_sales = self._summary_card(summary_row, "Avg / Period", "#60A5FA")
         self.period_count = self._summary_card(summary_row, "Periods", "#A78BFA")
-        layout.addLayout(summary_row)
+        left_col.addLayout(summary_row)
+
+        left_widget = QWidget()
+        left_widget.setLayout(left_col)
+        left_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        body_row.addWidget(left_widget, 3)
+
+        # ---- Right column: AI insights ----
+        right_col = QVBoxLayout()
+        right_col.setSpacing(10)
 
         # Insights Header & Action Button Row
         insights_header_row = QHBoxLayout()
         insights_title = QLabel("ⓘ Prescriptive Analytics & Recommendations")
-        insights_title.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        insights_title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        insights_title.setWordWrap(False)
         insights_title.setStyleSheet("QLabel { color: #F8FAFC; padding-top: 6px; }")
         insights_header_row.addWidget(insights_title)
         insights_header_row.addStretch()
+        right_col.addLayout(insights_header_row)
 
         # Dedicated button to trigger AI generation on demand
         self.generate_ai_button = QPushButton("✨ Generate AI Insights")
+        self.generate_ai_button.setFixedHeight(50)
         self.generate_ai_button.setStyleSheet("""
-            QPushButton { background: #4F46E5; color: white; border-radius: 6px; padding: 6px 12px; font-size: 11px; font-weight: 600; }
+            QPushButton { background: #4F46E5; color: white; border-radius: 8px; padding: 10px 16px; font-size: 18px; font-weight: 700; }
             QPushButton:hover { background: #6366F1; }
         """)
         self.generate_ai_button.clicked.connect(self.trigger_ai_insights)
-        insights_header_row.addWidget(self.generate_ai_button)
-        layout.addLayout(insights_header_row)
+        right_col.addWidget(self.generate_ai_button)
 
         # Scrollable container for readable, scrollable AI insights
         scroll_container = QScrollArea()
         scroll_container.setWidgetResizable(True)
-        scroll_container.setMinimumHeight(150)
+        scroll_container.setMinimumHeight(220)
+        scroll_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         scroll_container.setStyleSheet("""
             QScrollArea { background: transparent; border: none; }
             QScrollBar:vertical { background: rgba(5,10,20,120); width: 8px; margin: 2px; }
@@ -669,21 +748,32 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         """)
         scroll_container.viewport().setStyleSheet("background: transparent;")
 
-        self.ai_insights = QLabel("Click 'Generate AI Insights' to run the CFO analysis based on these metrics.")
+        self.ai_insights = QLabel()
+        self.ai_insights.setTextFormat(Qt.TextFormat.RichText)
+        self.ai_insights.setText(_format_ai_insight_html(
+            "Click 'Generate AI Insights' to run the CFO analysis based on these metrics."
+        ))
         self.ai_insights.setWordWrap(True)
+        self.ai_insights.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.ai_insights.setStyleSheet("""
             QLabel { 
                 background: rgba(67,56,202,110); 
-                color: #E0E7FF; 
+                color: #E7E9FF; 
                 border: 1px solid rgba(129,140,248,130); 
-                border-radius: 8px; 
-                padding: 14px; 
-                font-size: 13px; 
-                line-height: 1.4;
+                border-radius: 10px; 
+                padding: 20px 22px; 
+                font-size: 17px; 
             }
         """)
         scroll_container.setWidget(self.ai_insights)
-        layout.addWidget(scroll_container)
+        right_col.addWidget(scroll_container, 1)
+
+        right_widget = QWidget()
+        right_widget.setLayout(right_col)
+        right_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        body_row.addWidget(right_widget, 2)
+
+        layout.addLayout(body_row, 1)
 
         footer = QHBoxLayout()
         footer.addStretch()
@@ -705,9 +795,9 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         card_layout.setContentsMargins(10, 8, 10, 8)
         card_layout.setSpacing(2)
         title_label = QLabel(title)
-        title_label.setStyleSheet("color: #94A3B8; font-size: 10px;")
+        title_label.setStyleSheet("color: #94A3B8; font-size: 13px;")
         value_label = QLabel("₱0.00")
-        value_label.setStyleSheet(f"color: {accent}; font-size: 16px; font-weight: 700;")
+        value_label.setStyleSheet(f"color: {accent}; font-size: 19px; font-weight: 700;")
         card_layout.addWidget(title_label)
         card_layout.addWidget(value_label)
         parent_layout.addWidget(card)
@@ -725,15 +815,15 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         layout.setSpacing(10)
 
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet("QLabel { font-size: 16px; }")
+        icon_label.setStyleSheet("QLabel { font-size: 19px; }")
         layout.addWidget(icon_label)
 
         text_layout = QVBoxLayout()
         text_layout.setSpacing(1)
         title_label = QLabel(title)
-        title_label.setStyleSheet("QLabel { color: #94A3B8; font-size: 10px; font-weight: 600; }")
+        title_label.setStyleSheet("QLabel { color: #94A3B8; font-size: 13px; font-weight: 600; }")
         value_label = QLabel("—")
-        value_label.setStyleSheet(f"QLabel {{ color: {accent}; font-size: 14px; font-weight: 700; }}")
+        value_label.setStyleSheet(f"QLabel {{ color: {accent}; font-size: 17px; font-weight: 700; }}")
         text_layout.addWidget(title_label)
         text_layout.addWidget(value_label)
         layout.addLayout(text_layout)
@@ -743,7 +833,7 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         return value_label
 
     def set_ai_insight(self, response_text: str) -> None:
-        self.ai_insights.setText(response_text.strip())
+        self.ai_insights.setText(_format_ai_insight_html(response_text.strip()))
         self.generate_ai_button.setEnabled(True)
         self.generate_ai_button.setText("✨ Generate AI Insights")
 
@@ -783,7 +873,9 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         self.period_count.setText(str(len(values)))
 
         # Reset insight text until user explicitly clicks the generate button
-        self.ai_insights.setText("Click 'Generate AI Insights' to run the CFO analysis based on these metrics.")
+        self.ai_insights.setText(_format_ai_insight_html(
+            "Click 'Generate AI Insights' to run the CFO analysis based on these metrics."
+        ))
 
     def trigger_ai_insights(self):
         """Triggered only when the user explicitly clicks the Generate AI Insights button."""
@@ -792,7 +884,7 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         average = total / len(values) if values else 0.0
         peak = max(self.series, key=lambda item: item["value"], default={"label": "N/A", "value": 0})
 
-        self.ai_insights.setText("Loading AI recommendations...")
+        self.ai_insights.setText(_format_ai_insight_html("Loading AI recommendations..."))
         self.generate_ai_button.setEnabled(False)
         self.generate_ai_button.setText("Analyzing...")
 
@@ -811,7 +903,7 @@ class SalesAnalyticsReportDialog(BlurredDialog):
         Keep the tone professional, direct, and insightful for a business owner. Avoid markdown symbols or asterisks.
         """
 
-        self.ai_worker = AIWorker(prompt)
+        self.ai_worker = AIWorker(prompt, view_type="analytics", metric_period=self.period, force_refresh=False)
         self.ai_worker.finished.connect(self.set_ai_insight)
         self.ai_worker.start()
 
@@ -840,7 +932,7 @@ class SalesAnalyticsReportDialog(BlurredDialog):
 class BlockFlowAnalytics(QFrame):
     def __init__(self, role: str = "owner"):
         super().__init__()
-        self.setFont(QFont("Segoe UI", 10))
+        self.setFont(QFont("Segoe UI", 13))
         self.role = role
         self.setWindowTitle("BlockFlow — Analytics")
         self.setObjectName("AnalyticsWindow")
@@ -873,11 +965,11 @@ class BlockFlowAnalytics(QFrame):
 
     def _nav_button(self, text: str, active: bool = False) -> QPushButton:
         button = QPushButton(text)
-        button.setFixedHeight(34)
+        button.setFixedHeight(40)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setStyleSheet("""
             QPushButton {
-                background: %s; color: %s; border: none; border-radius: 8px; padding: 0 16px; font-size: 13px; font-weight: 600;
+                background: %s; color: %s; border: none; border-radius: 8px; padding: 0 16px; font-size: 16px; font-weight: 600;
             }
             QPushButton:hover { background: rgba(255,255,255,10); color: #F8FAFC; }
         """ % ("rgba(59,130,246,35)" if active else "transparent", "#93C5FD" if active else "#CBD5E1"))
@@ -889,7 +981,7 @@ class BlockFlowAnalytics(QFrame):
         root.setSpacing(0)
 
         nav = QFrame()
-        nav.setFixedHeight(68)
+        nav.setFixedHeight(70)
         nav.setStyleSheet("""
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -934,7 +1026,7 @@ class BlockFlowAnalytics(QFrame):
         else:
             # Fallback if logo not found
             brand_badge.setText("BF")
-            brand_badge.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            brand_badge.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
             brand_badge.setStyleSheet("""
                 QLabel { color: white; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3B82F6, stop:1 #8B5CF6); border-radius: 8px; }
             """)
@@ -943,10 +1035,10 @@ class BlockFlowAnalytics(QFrame):
         brand_text_col = QVBoxLayout()
         brand_text_col.setSpacing(0)
         brand_label = QLabel("BlockFlow")
-        brand_label.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        brand_label.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         brand_label.setStyleSheet("QLabel { color: #F8FAFC; letter-spacing: 0.3px; }")
         brand_sub = QLabel("BLOCKS TRADING")
-        brand_sub.setFont(QFont("Segoe UI", 8, QFont.Weight.DemiBold))
+        brand_sub.setFont(QFont("Segoe UI", 11, QFont.Weight.DemiBold))
         brand_sub.setStyleSheet("QLabel { color: #64748B; letter-spacing: 1.4px; }")
         brand_text_col.addWidget(brand_label)
         brand_text_col.addWidget(brand_sub)
@@ -977,7 +1069,7 @@ class BlockFlowAnalytics(QFrame):
 
         user_chip = QFrame()
         user_chip.setObjectName("UserChip")
-        user_chip.setFixedHeight(44)
+        user_chip.setFixedHeight(48)
         user_chip.setStyleSheet("""
             QFrame#UserChip {
                 background-color: rgba(30,41,59,150);
@@ -993,7 +1085,7 @@ class BlockFlowAnalytics(QFrame):
         avatar = QLabel("A" if is_admin else "S")
         avatar.setFixedSize(30, 30)
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        avatar.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        avatar.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         avatar.setStyleSheet("""
             color: white;
             background: qlineargradient(x1:0,y1:0,x2:1,y2:1, %s);
@@ -1003,10 +1095,10 @@ class BlockFlowAnalytics(QFrame):
         role_col = QVBoxLayout()
         role_col.setSpacing(0)
         role_title = QLabel("Admin" if is_admin else "Staff")
-        role_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        role_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         role_title.setStyleSheet("color: #F1F5F9;")
         role_caption = QLabel("Full Access" if is_admin else "Limited Access")
-        role_caption.setFont(QFont("Segoe UI", 9, QFont.Weight.Medium))
+        role_caption.setFont(QFont("Segoe UI", 12, QFont.Weight.Medium))
         role_caption.setStyleSheet("color: %s;" % ("#93C5FD" if is_admin else "#5EEAD4"))
         role_col.addWidget(role_title)
         role_col.addWidget(role_caption)
@@ -1015,7 +1107,7 @@ class BlockFlowAnalytics(QFrame):
         chip_layout.addLayout(role_col)
 
         logout = QPushButton("Logout")
-        logout.setFixedHeight(44)
+        logout.setFixedHeight(48)
         logout.setCursor(Qt.CursorShape.PointingHandCursor)
         logout.setStyleSheet("""
             QPushButton {
@@ -1025,7 +1117,7 @@ class BlockFlowAnalytics(QFrame):
                 border-radius: 22px;
                 border: 1px solid rgba(239,68,68,0.30);
                 font-weight: 700;
-                font-size: 13px;
+                font-size: 16px;
             }
             QPushButton:hover {
                 background-color: rgba(239,68,68,0.85);
@@ -1078,11 +1170,11 @@ class BlockFlowAnalytics(QFrame):
         chart_layout.setSpacing(6)
 
         chart_title = QLabel("▥ Sales Time Series Analysis")
-        chart_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        chart_title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         chart_layout.addWidget(chart_title)
 
         subtitle = QLabel("Historical sales by month")
-        subtitle.setStyleSheet(f"QLabel {{ color: {MUTED}; background: transparent; border: none; font-size: 11px; }}")
+        subtitle.setStyleSheet(f"QLabel {{ color: {MUTED}; background: transparent; border: none; font-size: 14px; }}")
         chart_layout.addWidget(subtitle)
 
         self.main_chart = SalesLineChart()
@@ -1095,12 +1187,12 @@ class BlockFlowAnalytics(QFrame):
         chart_layout.addLayout(stat_row)
 
         report_button = QPushButton("▣ Create Report")
-        report_button.setFixedHeight(34)
+        report_button.setFixedHeight(40)
         report_button.setStyleSheet("QPushButton { background: #2563EB; color: white; border-radius: 8px; padding: 0 14px; font-weight: 600; } QPushButton:hover { background: #3B82F6; }")
         report_button.clicked.connect(self.open_report)
 
         matplotlib_button = QPushButton("▥ Matplotlib Chart")
-        matplotlib_button.setFixedHeight(34)
+        matplotlib_button.setFixedHeight(40)
         matplotlib_button.setStyleSheet("QPushButton { background: rgba(16,185,129,180); color: white; border-radius: 8px; padding: 0 14px; font-weight: 600; } QPushButton:hover { background: #10B981; }")
         matplotlib_button.clicked.connect(self.open_matplotlib_chart)
 
@@ -1120,11 +1212,11 @@ class BlockFlowAnalytics(QFrame):
         forecast_layout.setSpacing(6)
 
         forecast_title = QLabel("▣ Autoregressive Sales Forecasting")
-        forecast_title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        forecast_title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         forecast_layout.addWidget(forecast_title)
 
         forecast_subtitle = QLabel("Input historical sales data to predict next month's sales using an AR(1) model")
-        forecast_subtitle.setStyleSheet("QLabel { color: #AEBBCB; background: transparent; border: none; font-size: 11px; }")
+        forecast_subtitle.setStyleSheet("QLabel { color: #AEBBCB; background: transparent; border: none; font-size: 14px; }")
         forecast_layout.addWidget(forecast_subtitle)
 
         self.forecast_current = QLabel()
@@ -1144,7 +1236,7 @@ class BlockFlowAnalytics(QFrame):
         for count in (2, 3, 4, 5, 6):
             button = QPushButton(f"{count} Months")
             button.setCheckable(True)
-            button.setFixedHeight(32)
+            button.setFixedHeight(38)
             button.clicked.connect(self._update_forecast_inputs)
             self.forecast_month_group.addButton(button, count)
             self.forecast_month_buttons[count] = button
@@ -1158,7 +1250,7 @@ class BlockFlowAnalytics(QFrame):
         forecast_layout.addWidget(history_label)
 
         history_hint = QLabel("Values come from recorded sales. You can edit these values if needed.")
-        history_hint.setStyleSheet("QLabel { color: #94A3B8; background: transparent; border: none; font-size: 11px; }")
+        history_hint.setStyleSheet("QLabel { color: #94A3B8; background: transparent; border: none; font-size: 14px; }")
         forecast_layout.addWidget(history_hint)
 
         self.forecast_inputs_layout = QGridLayout()
@@ -1168,7 +1260,7 @@ class BlockFlowAnalytics(QFrame):
         forecast_layout.addLayout(self.forecast_inputs_layout)
 
         calculate = QPushButton("⌁ Calculate Forecast")
-        calculate.setFixedHeight(36)
+        calculate.setFixedHeight(42)
         calculate.setStyleSheet("""
             QPushButton { background: #2563EB; color: white; border: none; border-radius: 8px; padding: 0 14px; font-weight: 600; }
             QPushButton:hover { background: #3B82F6; }
@@ -1191,15 +1283,15 @@ class BlockFlowAnalytics(QFrame):
         result_icon = QLabel("↗")
         result_icon.setFixedSize(34, 34)
         result_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        result_icon.setStyleSheet("QLabel { background: #10B981; color: white; border: none; border-radius: 17px; font-size: 18px; font-weight: bold; }")
+        result_icon.setStyleSheet("QLabel { background: #10B981; color: white; border: none; border-radius: 17px; font-size: 21px; font-weight: bold; }")
         result_header.addWidget(result_icon)
 
         result_text_layout = QVBoxLayout()
         result_text_layout.setSpacing(0)
         self.forecast_title = QLabel("Predicted Sales")
-        self.forecast_title.setStyleSheet("QLabel { background: transparent; border: none; color: #ECFDF5; font-size: 14px; font-weight: 700; padding: 0; margin: 0; }")
+        self.forecast_title.setStyleSheet("QLabel { background: transparent; border: none; color: #ECFDF5; font-size: 17px; font-weight: 700; padding: 0; margin: 0; }")
         self.forecast_subtitle_result = QLabel("Next Month Forecast")
-        self.forecast_subtitle_result.setStyleSheet("QLabel { background: transparent; border: none; color: #A7F3D0; font-size: 10px; padding: 0; margin: 0; }")
+        self.forecast_subtitle_result.setStyleSheet("QLabel { background: transparent; border: none; color: #A7F3D0; font-size: 13px; padding: 0; margin: 0; }")
         result_text_layout.addWidget(self.forecast_title)
         result_text_layout.addWidget(self.forecast_subtitle_result)
         result_header.addLayout(result_text_layout)
@@ -1207,11 +1299,11 @@ class BlockFlowAnalytics(QFrame):
         result_layout.addLayout(result_header)
 
         self.forecast_amount = QLabel("₱0.00")
-        self.forecast_amount.setStyleSheet("QLabel { background: transparent; border: none; color: #A7F3D0; font-size: 25px; font-weight: 800; padding: 4px 0 0 0; margin: 0; }")
+        self.forecast_amount.setStyleSheet("QLabel { background: transparent; border: none; color: #A7F3D0; font-size: 28px; font-weight: 800; padding: 4px 0 0 0; margin: 0; }")
         result_layout.addWidget(self.forecast_amount)
 
         self.forecast_model_info = QLabel("Calculate a forecast to see the estimate.")
-        self.forecast_model_info.setStyleSheet("QLabel { background: transparent; border: none; color: #86EFAC; font-size: 10px; padding: 2px 0 0 0; margin: 0; }")
+        self.forecast_model_info.setStyleSheet("QLabel { background: transparent; border: none; color: #86EFAC; font-size: 13px; padding: 2px 0 0 0; margin: 0; }")
         result_layout.addWidget(self.forecast_model_info)
 
         self.forecast_result.setVisible(False)
@@ -1253,16 +1345,16 @@ class BlockFlowAnalytics(QFrame):
         layout.setSpacing(10)
 
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet("QLabel { font-size: 16px; }")
+        icon_label.setStyleSheet("QLabel { font-size: 19px; }")
         layout.addWidget(icon_label)
 
         text_layout = QVBoxLayout()
         text_layout.setSpacing(1)
         title_label = QLabel(title)
-        title_label.setStyleSheet("QLabel { color: #94A3B8; font-size: 10px; font-weight: 600; }")
+        title_label.setStyleSheet("QLabel { color: #94A3B8; font-size: 13px; font-weight: 600; }")
         value_label = QLabel("—")
         value_label.setObjectName("StatChipValue")
-        value_label.setStyleSheet(f"QLabel#StatChipValue {{ color: {accent}; font-size: 14px; font-weight: 700; }}")
+        value_label.setStyleSheet(f"QLabel#StatChipValue {{ color: {accent}; font-size: 17px; font-weight: 700; }}")
         text_layout.addWidget(title_label)
         text_layout.addWidget(value_label)
         layout.addLayout(text_layout)
@@ -1289,7 +1381,7 @@ class BlockFlowAnalytics(QFrame):
         self.main_peak.setText(f"{peak['label']} · ₱{peak['value']:,.0f}")
         self.main_net.setText(f"₱{net:,.0f}")
         net_color = "#34D399" if net >= 0 else "#F87171"
-        self.main_net.setStyleSheet(f"QLabel#StatChipValue {{ color: {net_color}; font-size: 14px; font-weight: 700; }}")
+        self.main_net.setStyleSheet(f"QLabel#StatChipValue {{ color: {net_color}; font-size: 17px; font-weight: 700; }}")
         self.forecast_current.setText(f"Current Month: {date.today().strftime('%B %Y')}")
         self._update_forecast_inputs()
 
@@ -1366,13 +1458,13 @@ class BlockFlowAnalytics(QFrame):
             column = QVBoxLayout()
             column.setSpacing(4)
             label_widget = QLabel(label)
-            label_widget.setStyleSheet("QLabel { color: #CBD5E1; background: transparent; border: none; font-weight: 600; font-size: 11px; padding: 0; }")
+            label_widget.setStyleSheet("QLabel { color: #CBD5E1; background: transparent; border: none; font-weight: 600; font-size: 14px; padding: 0; }")
             field = QLineEdit(f"{value:.2f}")
             field.setPlaceholderText("0.00")
-            field.setFixedHeight(34)
+            field.setFixedHeight(40)
             field.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             field.setStyleSheet("""
-                QLineEdit { background: rgba(15,23,42,235); color: #F8FAFC; border: 1px solid rgba(148,163,184,110); border-radius: 7px; padding: 7px; font-size: 12px; }
+                QLineEdit { background: rgba(15,23,42,235); color: #F8FAFC; border: 1px solid rgba(148,163,184,110); border-radius: 7px; padding: 7px; font-size: 15px; }
                 QLineEdit:focus { border: 1px solid #60A5FA; background: rgba(15,23,42,245); }
                 QLineEdit:hover { border: 1px solid rgba(148,163,184,160); }
             """)
@@ -1398,7 +1490,14 @@ class BlockFlowAnalytics(QFrame):
         self.close()
 
     def handle_logout(self):
+        if getattr(self, "_logging_out", False):
+            return
+        self._logging_out = True
+        from session_nav import invalidate_auth_flow
+
+        invalidate_auth_flow()
         from login_view import BlockFlowLogin
+
         self.login_window = BlockFlowLogin()
         self.login_window.show()
         self.close()
@@ -1411,7 +1510,7 @@ class BlockFlowAnalytics(QFrame):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setFont(QFont("Segoe UI", 10))
+    app.setFont(QFont("Segoe UI", 13))
     window = BlockFlowAnalytics()
     window.show()
     sys.exit(app.exec())

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 from database import (
@@ -17,11 +17,24 @@ from database import (
 router = APIRouter()
 
 
+def _request_recorded_by(payload_value: str, role_header: str | None) -> str:
+    """Resolve the recorder from the active desktop role.
+
+    The desktop sends both the role-derived payload and an explicit header.
+    The header prevents a stale/default Pydantic value ("staff") from
+    overwriting an Admin/Owner record.
+    """
+    raw = role_header if role_header is not None else payload_value
+    clean = (raw or "staff").strip().lower()
+    return "owner" if clean in {"owner", "admin", "admin / owner", "admin/owner"} else "staff"
+
+
 class ExpenseRequest(BaseModel):
     expense_name: str = Field(min_length=1)
     amount: float = Field(gt=0)
     category: str = Field(min_length=1)
     date_added: str = Field(min_length=8)
+    recorded_by: str = "staff"
 
 
 class InventoryRequest(BaseModel):
@@ -30,13 +43,16 @@ class InventoryRequest(BaseModel):
     date_added: str = Field(min_length=8)
     size: str = "None"
     unit: str = "pcs"
+    recorded_by: str = "staff"
 
 
 class SalesRequest(BaseModel):
     customer_name: str = Field(min_length=1)
+    customer_number: str = Field(min_length=1)
     shop_name: str = Field(min_length=1)
     block_size: str = Field(min_length=1)
     quantity: int = Field(gt=0)
+    recorded_by: str = "staff"
     sale_date: str = Field(min_length=8)
 
 
@@ -54,7 +70,9 @@ class RegisterRequest(BaseModel):
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    # Version marker: useful for confirming that the backend process was
+    # restarted after installing the updated project.
+    return {"status": "ok", "recorded_by_fix": "v4-2026-09-11"}
 
 
 @router.post("/login")
@@ -103,13 +121,14 @@ def get_expenses() -> list[dict]:
 
 
 @router.post("/expenses", status_code=status.HTTP_201_CREATED)
-def add_expense(data: ExpenseRequest) -> dict[str, str | int]:
+def add_expense(data: ExpenseRequest, x_blockflow_role: str | None = Header(default=None)) -> dict[str, str | int]:
     try:
         expense_id = record_expense(
             expense_name=data.expense_name,
             amount=data.amount,
             category=data.category,
             date_added=data.date_added,
+            recorded_by=_request_recorded_by(data.recorded_by, x_blockflow_role),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -122,7 +141,7 @@ def get_inventory() -> list[dict]:
 
 
 @router.post("/inventory", status_code=status.HTTP_201_CREATED)
-def add_inventory(data: InventoryRequest) -> dict[str, str | int]:
+def add_inventory(data: InventoryRequest, x_blockflow_role: str | None = Header(default=None)) -> dict[str, str | int]:
     try:
         inventory_id = record_new_stock(
             quantity=data.quantity,
@@ -130,6 +149,7 @@ def add_inventory(data: InventoryRequest) -> dict[str, str | int]:
             date_added=data.date_added,
             size=data.size,
             unit=data.unit,
+            recorded_by=_request_recorded_by(data.recorded_by, x_blockflow_role),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -146,14 +166,16 @@ def get_sales() -> list[dict]:
 
 
 @router.post("/sales", status_code=status.HTTP_201_CREATED)
-def add_sale(data: SalesRequest) -> dict[str, str | int]:
+def add_sale(data: SalesRequest, x_blockflow_role: str | None = Header(default=None)) -> dict[str, str | int]:
     try:
         sale_id = record_sale(
             customer_name=data.customer_name,
+            customer_number=data.customer_number,
             shop_name=data.shop_name,
             block_size=data.block_size,
             quantity=data.quantity,
             sale_date=data.sale_date,
+            recorded_by=_request_recorded_by(data.recorded_by, x_blockflow_role),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

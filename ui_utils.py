@@ -12,7 +12,7 @@ subclasses only need to change their base class.
 from __future__ import annotations
 
 from PyQt6.QtCore import QEasingCurve, QEventLoop, QParallelAnimationGroup, QPoint, QPropertyAnimation
-from PyQt6.QtWidgets import QDialog, QGraphicsBlurEffect, QWidget
+from PyQt6.QtWidgets import QDialog, QGraphicsBlurEffect, QMessageBox, QWidget
 
 
 def _background_target(dialog: QDialog) -> QWidget | None:
@@ -145,3 +145,64 @@ class BlurredDialog(QDialog):
         group.finished.connect(loop.quit)
         group.start()
         loop.exec()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Themed message boxes
+#
+# The stock QMessageBox.warning/critical/information dialogs pick up almost
+# no styling from the app's dark theme on some systems, which can leave the
+# text (or the OK button) nearly invisible against a black background. These
+# helpers build a QMessageBox by hand and force a dark, readable style
+# directly onto that instance, so they always render correctly regardless of
+# OS theme. Use them exactly like the QMessageBox static methods they replace:
+# show_warning(self, "Title", "Message"), etc.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MESSAGE_BOX_STYLE = """
+    QMessageBox {
+        background-color: #0F172A;
+    }
+    QMessageBox QLabel {
+        color: #F1F5F9;
+        font-size: 16px;
+        background: transparent;
+    }
+    QMessageBox QPushButton {
+        background-color: #4F46E5;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 20px;
+        min-width: 72px;
+        font-weight: 600;
+        font-size: 15px;
+    }
+    QMessageBox QPushButton:hover {
+        background-color: #6366F1;
+    }
+    QMessageBox QPushButton:pressed {
+        background-color: #4338CA;
+    }
+"""
+
+
+def _show_message(parent, icon: QMessageBox.Icon, title: str, text: str) -> int:
+    box = QMessageBox(parent)
+    box.setIcon(icon)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setStyleSheet(_MESSAGE_BOX_STYLE)
+    return box.exec()
+
+
+def show_warning(parent, title: str, text: str) -> int:
+    return _show_message(parent, QMessageBox.Icon.Warning, title, text)
+
+
+def show_critical(parent, title: str, text: str) -> int:
+    return _show_message(parent, QMessageBox.Icon.Critical, title, text)
+
+
+def show_information(parent, title: str, text: str) -> int:
+    return _show_message(parent, QMessageBox.Icon.Information, title, text)

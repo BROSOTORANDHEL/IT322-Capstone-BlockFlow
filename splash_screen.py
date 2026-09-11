@@ -34,6 +34,8 @@ class SplashScreen(QWidget):
         self.dot_count = 0
         self.dot_cycle = 0
         self.alpha = 0.0
+        self._cancelled = False
+        self._closed_emitted = False
         
         # Setup layout
         layout = QVBoxLayout(self)
@@ -73,10 +75,10 @@ class SplashScreen(QWidget):
         
         self.setLayout(layout)
         
-        # Start animations
-        self.timer = QTimer()
+        # Start animations (parented so they stop if this widget is destroyed)
+        self.timer = QTimer(self)
         self.timer.timeout.connect(self.animate)
-        self.timer.start(100)  # Slower update rate for smoother animation
+        self.timer.start(100)
         
         # Fade in animation
         self.setWindowOpacity(0.0)
@@ -88,7 +90,10 @@ class SplashScreen(QWidget):
         self._anim.start()
         
         # Auto close after 5 seconds
-        QTimer.singleShot(5000, self.close_splash)
+        self._close_timer = QTimer(self)
+        self._close_timer.setSingleShot(True)
+        self._close_timer.timeout.connect(self.close_splash)
+        self._close_timer.start(5000)
     
     def animate(self):
         """Animate logo pulse and loading dots."""
@@ -135,9 +140,23 @@ class SplashScreen(QWidget):
             
             self.logo_label.setPixmap(canvas)
     
+    def cancel(self):
+        """Stop animations without opening the next screen."""
+        self._cancelled = True
+        self.timer.stop()
+        if hasattr(self, "_close_timer"):
+            self._close_timer.stop()
+        if hasattr(self, "_fade_anim"):
+            self._fade_anim.stop()
+        self.close()
+
     def close_splash(self):
         """Close splash screen with fade out effect."""
+        if self._cancelled:
+            return
         self.timer.stop()
+        if hasattr(self, "_close_timer"):
+            self._close_timer.stop()
         
         # Fade out
         fade_anim = QPropertyAnimation(self, b"windowOpacity")
@@ -152,7 +171,19 @@ class SplashScreen(QWidget):
     def on_close_finished(self):
         """Called when fade out animation finishes."""
         self.close()
-        self.closed.emit()  # Emit signal so login knows splash is closed
+        self._emit_closed()
+
+    def _emit_closed(self):
+        if self._cancelled or self._closed_emitted:
+            return
+        self._closed_emitted = True
+        self.closed.emit()
+
+    def closeEvent(self, event):
+        self.timer.stop()
+        if hasattr(self, "_close_timer"):
+            self._close_timer.stop()
+        super().closeEvent(event)
     
     def paintEvent(self, event):
         """Paint background image."""

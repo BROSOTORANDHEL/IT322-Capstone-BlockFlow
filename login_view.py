@@ -1,7 +1,7 @@
 import sys
 import os
 import requests
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QFont, QPainter, QColor, QLinearGradient
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
@@ -9,11 +9,50 @@ from PyQt6.QtWidgets import (
     QGraphicsOpacityEffect
 )
 
+from ui_utils import show_critical, show_information, show_warning
+
+
+class LoginWorker(QThread):
+    """Run the login HTTP call off the UI thread so the window stays responsive."""
+
+    succeeded = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+    unreachable = pyqtSignal()
+
+    def __init__(self, backend_url: str, payload: dict, parent=None):
+        super().__init__(parent)
+        self.backend_url = backend_url
+        self.payload = payload
+
+    def run(self):
+        try:
+            response = requests.post(
+                f"{self.backend_url}/login", json=self.payload, timeout=10
+            )
+            if response.status_code in (200, 201):
+                self.succeeded.emit(response.json())
+                return
+            try:
+                detail = response.json().get("detail", "Invalid credentials")
+            except ValueError:
+                detail = "Invalid credentials"
+            self.failed.emit(str(detail))
+        except requests.exceptions.ConnectionError:
+            self.unreachable.emit()
+        except requests.exceptions.Timeout:
+            self.failed.emit("The server took too long to respond. Please try again.")
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
 
 class BlockFlowLogin(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("BlockFlow — Business Management System")
+        self._login_in_progress = False
+        self._login_worker = None
+        self._splash = None
+        self._auth_flow_id = 0
 
         self.backend_url = os.environ.get(
             "BLOCKFLOW_API_URL", "http://127.0.0.1:8000/api"
@@ -152,8 +191,14 @@ class BlockFlowLogin(QWidget):
                 color: #F8FAFC;
                 selection-background-color: #334155;
                 border: 1px solid #334155;
+                outline: none;
+            }
+            QComboBox QAbstractItemView::item {
+                padding: 10px 14px;
+                min-height: 30px;
             }
         """)
+        self.role_box.view().setMinimumWidth(240)
         inner_layout.addWidget(self.role_box)
         inner_layout.addSpacing(16)
 
@@ -273,77 +318,118 @@ class BlockFlowLogin(QWidget):
             QLineEdit::placeholder { color: #475569; }
         """)
 
+    def _set_login_busy(self, busy: bool):
+        self._login_in_progress = busy
+        self.login_btn.setEnabled(not busy)
+        self.register_btn.setEnabled(not busy)
+        self.user_input.setEnabled(not busy)
+        self.pass_input.setEnabled(not busy)
+        self.role_box.setEnabled(not busy)
+        self.login_btn.setText("Signing in..." if busy else "Sign In")
+
     # ── Login handler ────────────────────────────────────────────────────────
     def handle_api_login(self):
+        if self._login_in_progress:
+            return
+
         email = self.user_input.text().strip()
         password = self.pass_input.text()
 
         if not email or not password:
-            QMessageBox.warning(self, "Input Error", "Please fill in all email and password fields.")
+            show_warning(self, "Input Error", "Please fill in all email and password fields.")
+            return
+
+        from session_nav import begin_auth_flow
+
+        self._auth_flow_id = begin_auth_flow()
+        payload = {
+            "email": email,
+            "password": password,
+            "role": self.role_box.currentText(),
+        }
+        self._set_login_busy(True)
+        self._login_worker = LoginWorker(self.backend_url, payload, self)
+        self._login_worker.succeeded.connect(self._on_login_succeeded)
+        self._login_worker.failed.connect(self._on_login_failed)
+        self._login_worker.unreachable.connect(self._on_login_unreachable)
+        self._login_worker.start()
+
+    def _on_login_succeeded(self, data: dict):
+        from session_nav import is_active_auth_flow
+
+        if not is_active_auth_flow(self._auth_flow_id) or not self.isVisible():
+            self._set_login_busy(False)
+            return
+
+        user_role = data.get("role", "staff")
+        try:
+            from splash_screen import SplashScreen
+
+            # Keep the splash on `self` so Python cannot garbage-collect it
+            # while the loading animation is still running.
+            self._splash = SplashScreen()
+            self._splash.show()
+            self._splash.closed.connect(
+                lambda role=user_role: self._open_dashboard(role)
+            )
+        except ImportError:
+            self._open_dashboard(user_role)
+
+    def _open_dashboard(self, user_role: str):
+        from session_nav import is_active_auth_flow
+
+        if not is_active_auth_flow(self._auth_flow_id):
+            self._set_login_busy(False)
+            return
+        if not self.isVisible():
             return
 
         try:
-            payload = {
-                "email": email,
-                "password": password,
-                "role": self.role_box.currentText(),
-            }
-            response = requests.post(
-                f"{self.backend_url}/login", json=payload, timeout=10
-            )
+            from dashboard_view import BlockFlowDashboard
 
-            if response.status_code in (200, 201):
-                data = response.json()
-                user_role = data.get('role', 'client')
-                
-                # Show splash screen and wait for it to close before loading dashboard
-                try:
-                    from splash_screen import SplashScreen
-                    from PyQt6.QtWidgets import QApplication
-                    
-                    splash = SplashScreen()
-                    splash.show()
-                    
-                    # Wait for splash to close before continuing
-                    def load_dashboard():
-                        # Both owner/admin and staff land on the Dashboard —
-                        # BlockFlowDashboard itself trims what staff can see
-                        # (limited KPIs, no full Transaction History, etc.)
-                        # and staff can still navigate to Inventory from there.
-                        try:
-                            from dashboard_view import BlockFlowDashboard
-                            self.dashboard_window = BlockFlowDashboard(role=user_role)
-                            self.dashboard_window.showFullScreen()
-                            self.close()
-                        except ImportError:
-                            QMessageBox.critical(self, "Import Error", "Could not find 'dashboard_view.py'.")
-                    
-                    # Connect splash closed signal to load dashboard
-                    splash.closed.connect(load_dashboard)
-                    
-                except ImportError:
-                    # Fallback if splash screen not found
-                    try:
-                        from dashboard_view import BlockFlowDashboard
-                        self.dashboard_window = BlockFlowDashboard(role=user_role)
-                        self.dashboard_window.showFullScreen()
-                        self.close()
-                    except ImportError:
-                        QMessageBox.critical(self, "Import Error", "Could not find 'dashboard_view.py'.")
-            else:
-                detail = response.json().get("detail", "Invalid credentials")
-                QMessageBox.critical(self, "Login Failed", f"Authentication Rejected:\n{detail}")
+            self.dashboard_window = BlockFlowDashboard(role=user_role)
+            self.dashboard_window.showFullScreen()
+            self._splash = None
+            self.close()
+        except ImportError:
+            self._set_login_busy(False)
+            show_critical(self, "Import Error", "Could not find 'dashboard_view.py'.")
 
-        except requests.exceptions.ConnectionError:
-            QMessageBox.critical(self, "Server Error",
-                "Could not connect to the Backend server!\nMake sure App.py is running.")
+    def _on_login_failed(self, detail: str):
+        from session_nav import is_active_auth_flow
+
+        if not is_active_auth_flow(self._auth_flow_id):
+            return
+        self._set_login_busy(False)
+        show_critical(self, "Login Failed", f"Authentication Rejected:\n{detail}")
+
+    def _on_login_unreachable(self):
+        from session_nav import is_active_auth_flow
+
+        if not is_active_auth_flow(self._auth_flow_id):
+            return
+        self._set_login_busy(False)
+        show_critical(
+            self,
+            "Server Error",
+            "Could not connect to the Backend server!\nMake sure App.py is running.",
+        )
+
+    def closeEvent(self, event):
+        if self._splash is not None and self._splash.isVisible():
+            from session_nav import invalidate_auth_flow
+
+            invalidate_auth_flow()
+            self._splash.cancel()
+            self._splash = None
+        super().closeEvent(event)
 
     # ── Register handler ─────────────────────────────────────────────────────
     def handle_api_registration(self):
         email = self.user_input.text().strip()
         password = self.pass_input.text()
         if not email or not password:
-            QMessageBox.warning(self, "Registration Error",
+            show_warning(self, "Registration Error",
                 "Please provide an email and password to create an account.")
             return
 
@@ -359,14 +445,14 @@ class BlockFlowLogin(QWidget):
 
             if response.status_code in (200, 201):
                 data = response.json()
-                QMessageBox.information(self, "Registration Success", data.get("message"))
+                show_information(self, "Registration Success", data.get("message"))
                 self.user_input.clear()
                 self.pass_input.clear()
             else:
                 detail = response.json().get("detail", "Failed to register user")
-                QMessageBox.warning(self, "Registration Failed", f"Backend rejected command:\n{detail}")
+                show_warning(self, "Registration Failed", f"Backend rejected command:\n{detail}")
         except requests.exceptions.ConnectionError:
-            QMessageBox.critical(self, "Server Error",
+            show_critical(self, "Server Error",
                 "Could not connect to the Backend server!\nMake sure App.py is running.")
 
     # ── Background painting ──────────────────────────────────────────────────
@@ -394,6 +480,27 @@ class BlockFlowLogin(QWidget):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setFont(QFont("Segoe UI", 10))
+    app.setStyleSheet("""
+        QMessageBox {
+            background-color: #0F172A;
+        }
+        QMessageBox QLabel {
+            color: #F1F5F9;
+            font-size: 13px;
+        }
+        QMessageBox QPushButton {
+            background-color: #4F46E5;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 7px 18px;
+            min-width: 72px;
+            font-weight: 600;
+        }
+        QMessageBox QPushButton:hover {
+            background-color: #6366F1;
+        }
+    """)
     window = BlockFlowLogin()
     window.show()
     sys.exit(app.exec())
