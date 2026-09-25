@@ -3,3 +3,7 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
+build/
+dist/
+*.spec
+App.exe

@@ -1,14 +1,14 @@
 import sys
 import os
 import json
-from PyQt6.QtCore import Qt, QDate, QUrl, QPropertyAnimation, QEasingCurve, QTimer
+from PyQt6.QtCore import Qt, QDate, QUrl, QPropertyAnimation, QEasingCurve, QTimer, QStringListModel
 from PyQt6.QtGui import QFont, QColor, QPainter, QPixmap, QLinearGradient, QBrush
 from PyQt6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QFrame, QTableWidget, QTableWidgetItem,
     QHeaderView, QDialog, QComboBox, QLineEdit, QDateEdit, QMessageBox,
-    QGraphicsOpacityEffect, QSizePolicy, QStackedWidget
+    QGraphicsOpacityEffect, QSizePolicy, QStackedWidget, QCompleter
 )
 
 from ui_utils import BlurredDialog, show_critical, show_warning
@@ -478,6 +478,16 @@ class BlockFlowInventory(QWidget):
         self.expense_records = []
         self.inventory_records = []
         self.sales_records = []
+        # Raw (unformatted) versions of the rows above, kept in the same
+        # order/index so a table click can look up the exact source values
+        # to pre-fill the entry panel on the right.
+        self.expense_raw_records = []
+        self.inventory_raw_records = []
+        self.sales_raw_records = []
+        # Maps a lowercased customer name to their most recent known info,
+        # so the autocomplete dropdown on Customer Name can auto-fill the
+        # number and shop the moment an existing customer is picked.
+        self.customer_directory = {}
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         self.image_path = os.path.join(current_dir, "image_b08741.png")
@@ -869,6 +879,10 @@ class BlockFlowInventory(QWidget):
         self.table.horizontalHeader().setDefaultAlignment(
             Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
         )
+        # Clicking a row hints that it's actionable, and loads that record
+        # into the entry panel on the right (see on_table_row_clicked).
+        self.table.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.table.cellClicked.connect(self.on_table_row_clicked)
 
         wrapper_layout.addWidget(self.table)
 
@@ -944,6 +958,104 @@ class BlockFlowInventory(QWidget):
             }}
         """)
 
+    # ── Customer name autocomplete ───────────────────────────────────────────────
+    def _attach_customer_autocomplete(self, line_edit: QLineEdit) -> None:
+        """Wire a QCompleter onto the Customer Name field so typing a few
+        letters of an already-recorded customer pops a small dropdown of
+        matches below the textbox; picking one fills in their number/shop."""
+        completer = QCompleter(self)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        completer.popup().setStyleSheet("""
+            QListView {
+                background-color: #111827;
+                color: #F1F5F9;
+                border: 1px solid rgba(255,255,255,15);
+                border-radius: 8px;
+                padding: 4px;
+                outline: none;
+            }
+            QListView::item { padding: 8px 10px; border-radius: 6px; }
+            QListView::item:selected {
+                background-color: rgba(16,185,129,0.25);
+                color: #FFFFFF;
+            }
+        """)
+        line_edit.setCompleter(completer)
+        # QCompleter's string-emitting signal is the overloaded `activated`
+        # (there is no `textActivated` on QCompleter — that's a QComboBox
+        # thing). Index into the overload to get the QString variant.
+        completer.activated[str].connect(self._on_customer_name_selected)
+        self.customer_completer = completer
+        self._refresh_customer_completer_model()
+
+    def _refresh_customer_completer_model(self) -> None:
+        completer = getattr(self, "customer_completer", None)
+        if completer is None:
+            return
+        names = sorted({v["customer_name"] for v in self.customer_directory.values()}, key=str.lower)
+        completer.setModel(QStringListModel(names, completer))
+
+    def _rebuild_customer_directory(self) -> None:
+        """Rebuild the name → (number, shop) lookup from the latest sales
+        fetch, and refresh the autocomplete list to match."""
+        directory = {}
+        for raw in self.sales_raw_records:
+            name = str(raw.get("customer_name", "")).strip()
+            if not name or name.upper() == "N/A":
+                continue
+            directory[name.lower()] = {
+                "customer_name": name,
+                "customer_number": raw.get("customer_number", ""),
+                "shop_name": raw.get("shop_name", ""),
+            }
+        self.customer_directory = directory
+        self._refresh_customer_completer_model()
+
+    def _on_customer_name_selected(self, text: str) -> None:
+        entry = self.customer_directory.get(text.strip().lower())
+        if not entry:
+            return
+        self.inline_sales_cust.setText(entry["customer_name"])
+        self.inline_sales_cust_number.setText(str(entry.get("customer_number", "")))
+        self.inline_sales_shop.setText(str(entry.get("shop_name", "")))
+
+    # ── Quick-preset buttons (quantity / amount shortcuts) ───────────────────────
+    def _build_quick_preset_row(self, values, target_line_edit, rgb="16,185,129",
+                                 text_color="#6EE7B7", value_formatter=lambda v: f"{v:,}"):
+        """A row of small pill buttons that drop a preset value straight into
+        `target_line_edit` when clicked — e.g. quick quantities (100/250/500/1000)
+        or quick expense amounts (₱1,000/₱2,000/₱3,000)."""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for value in values:
+            btn = QPushButton(value_formatter(value))
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(34)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: rgba({rgb},0.12);
+                    color: {text_color};
+                    border: 1px solid rgba({rgb},0.35);
+                    border-radius: 8px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    padding: 0 6px;
+                }}
+                QPushButton:hover {{
+                    background-color: rgba({rgb},0.25);
+                    border-color: rgb({rgb});
+                    color: #FFFFFF;
+                }}
+                QPushButton:pressed {{
+                    background-color: rgba({rgb},0.4);
+                }}
+            """)
+            btn.clicked.connect(lambda _checked=False, v=value: target_line_edit.setText(str(v)))
+            row.addWidget(btn)
+        return row
+
     def _build_sales_entry_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -953,6 +1065,7 @@ class BlockFlowInventory(QWidget):
         layout.addWidget(_field_label("Customer Name"))
         self.inline_sales_cust = QLineEdit()
         self.inline_sales_cust.setPlaceholderText("e.g., Juan Dela Cruz")
+        self._attach_customer_autocomplete(self.inline_sales_cust)
         layout.addWidget(self.inline_sales_cust)
 
         layout.addWidget(_field_label("Customer Number"))
@@ -983,6 +1096,12 @@ class BlockFlowInventory(QWidget):
         row.addLayout(col1, stretch=3)
         row.addLayout(col2, stretch=2)
         layout.addLayout(row)
+
+        layout.addWidget(_field_label("Quick Quantity"))
+        layout.addLayout(self._build_quick_preset_row(
+            [100, 250, 500, 1000], self.inline_sales_qty,
+            rgb="16,185,129", text_color="#6EE7B7"
+        ))
 
         layout.addWidget(_field_label("Sale Date"))
         self.inline_sales_date = QDateEdit()
@@ -1031,6 +1150,13 @@ class BlockFlowInventory(QWidget):
         self.inline_expense_amount = QLineEdit()
         self.inline_expense_amount.setPlaceholderText("e.g., 2500.00")
         layout.addWidget(self.inline_expense_amount)
+
+        layout.addWidget(_field_label("Quick Amount"))
+        layout.addLayout(self._build_quick_preset_row(
+            [1000, 2000, 3000], self.inline_expense_amount,
+            rgb="239,68,68", text_color="#FCA5A5",
+            value_formatter=lambda v: f"₱{v:,}"
+        ))
 
         layout.addWidget(_field_label("Date Recorded"))
         self.inline_expense_date = QDateEdit()
@@ -1088,6 +1214,12 @@ class BlockFlowInventory(QWidget):
         row.addLayout(col1, stretch=3)
         row.addLayout(col2, stretch=2)
         layout.addLayout(row)
+
+        layout.addWidget(_field_label("Quick Quantity"))
+        layout.addLayout(self._build_quick_preset_row(
+            [100, 250, 500, 1000], self.inline_stock_qty,
+            rgb="59,130,246", text_color="#93C5FD"
+        ))
 
         layout.addSpacing(4)
         self.inline_stock_submit = QPushButton("Save Stock")
@@ -1427,6 +1559,7 @@ class BlockFlowInventory(QWidget):
             try:
                 data = json.loads(bytes(reply.readAll()).decode('utf-8'))
                 loaded = []
+                raw_rows = []
                 for item in data:
                     date_val = str(item.get("sale_date") or "N/A")
                     cust = str(item.get("customer_name") or "N/A")
@@ -1443,12 +1576,24 @@ class BlockFlowInventory(QWidget):
                         total_calc = qty_num * unit_price
                     recorded_by = format_recorded_by(item.get("recorded_by"))
                     loaded.append([date_val, cust, cust_number, shop, size, f"{qty_num:,} pcs", f"₱{total_calc:,.0f}", recorded_by])
+                    raw_rows.append({
+                        "customer_name": cust,
+                        "customer_number": cust_number,
+                        "shop_name": shop,
+                        "block_size": size,
+                        "quantity": qty_num,
+                        "sale_date": date_val,
+                    })
                 self.sales_records = loaded
+                self.sales_raw_records = raw_rows
             except Exception as e:
                 print(f"Sales JSON parse error: {e}")
                 self.sales_records = []
+                self.sales_raw_records = []
         else:
             self.sales_records = []
+            self.sales_raw_records = []
+        self._rebuild_customer_directory()
         reply.deleteLater()
         if self.current_tab == "sales":
             self.refresh_table()
@@ -1463,6 +1608,7 @@ class BlockFlowInventory(QWidget):
             try:
                 data = json.loads(bytes(reply.readAll()).decode('utf-8'))
                 loaded = []
+                raw_rows = []
                 for item in data:
                     date_val = item.get("date_added", "N/A")
                     cat = item.get("category", "Raw Material")
@@ -1473,12 +1619,21 @@ class BlockFlowInventory(QWidget):
                         amt = 0.0
                     recorded_by = format_recorded_by(item.get("recorded_by"))
                     loaded.append([date_val, cat, desc, f"₱{amt:,.2f}", recorded_by])
+                    raw_rows.append({
+                        "category": cat,
+                        "expense_name": desc,
+                        "amount": amt,
+                        "date_added": date_val,
+                    })
                 self.expense_records = loaded
+                self.expense_raw_records = raw_rows
             except Exception as e:
                 print(f"Expense JSON parse error: {e}")
                 self.expense_records = []
+                self.expense_raw_records = []
         else:
             self.expense_records = []
+            self.expense_raw_records = []
         reply.deleteLater()
         if self.current_tab == "expenses":
             self.refresh_table()
@@ -1493,6 +1648,7 @@ class BlockFlowInventory(QWidget):
             try:
                 data = json.loads(bytes(reply.readAll()).decode('utf-8'))
                 loaded = []
+                raw_rows = []
                 for item in data:
                     size = item.get("size", "None")
                     try:
@@ -1503,12 +1659,21 @@ class BlockFlowInventory(QWidget):
                     date_added = item.get("date_added", "N/A")
                     recorded_by = format_recorded_by(item.get("recorded_by"))
                     loaded.append([size, f"{qty:,}", unit, date_added, recorded_by])
+                    raw_rows.append({
+                        "size": size,
+                        "quantity": qty,
+                        "unit": unit,
+                        "date_added": date_added,
+                    })
                 self.inventory_records = loaded
+                self.inventory_raw_records = raw_rows
             except Exception as e:
                 print(f"Inventory JSON parse error: {e}")
                 self.inventory_records = []
+                self.inventory_raw_records = []
         else:
             self.inventory_records = []
+            self.inventory_raw_records = []
         reply.deleteLater()
         if self.current_tab == "stock":
             self.refresh_table()
@@ -1537,6 +1702,67 @@ class BlockFlowInventory(QWidget):
                 item.setTextAlignment(self.ALIGN_CENTER)
 
                 self.table.setItem(row_idx, col_idx, item)
+
+    # ── Row click → pre-fill entry panel ────────────────────────────────────────
+    def on_table_row_clicked(self, row, column):
+        """Clicking any record row loads its data into the matching entry
+        panel on the right, so re-entering a similar sale/expense/stock item
+        (or just reviewing it up close) doesn't require retyping everything."""
+        if self.current_tab == "sales":
+            self._fill_sales_form_from_row(row)
+        elif self.current_tab == "expenses":
+            self._fill_expense_form_from_row(row)
+        elif self.current_tab == "stock":
+            self._fill_stock_form_from_row(row)
+
+    def _fill_sales_form_from_row(self, row):
+        if row < 0 or row >= len(self.sales_raw_records):
+            return
+        raw = self.sales_raw_records[row]
+
+        self.inline_sales_cust.setText(str(raw.get("customer_name", "")))
+        self.inline_sales_cust_number.setText(str(raw.get("customer_number", "")))
+        self.inline_sales_shop.setText(str(raw.get("shop_name", "")))
+
+        size = str(raw.get("block_size", "L (Large)"))
+        self.inline_sales_size.setCurrentIndex(1 if "XL" in size.upper() else 0)
+
+        self.inline_sales_qty.setText(str(raw.get("quantity", 0)))
+
+        parsed_date = QDate.fromString(str(raw.get("sale_date", "")), "yyyy-MM-dd")
+        self.inline_sales_date.setDate(parsed_date if parsed_date.isValid() else QDate.currentDate())
+
+    def _fill_expense_form_from_row(self, row):
+        if row < 0 or row >= len(self.expense_raw_records):
+            return
+        raw = self.expense_raw_records[row]
+
+        idx = self.inline_expense_category.findText(str(raw.get("category", "")))
+        self.inline_expense_category.setCurrentIndex(idx if idx >= 0 else 0)
+
+        self.inline_expense_desc.setText(str(raw.get("expense_name", "")))
+        self.inline_expense_amount.setText(f"{float(raw.get('amount', 0) or 0):.2f}")
+
+        parsed_date = QDate.fromString(str(raw.get("date_added", "")), "yyyy-MM-dd")
+        self.inline_expense_date.setDate(parsed_date if parsed_date.isValid() else QDate.currentDate())
+
+    def _fill_stock_form_from_row(self, row):
+        if row < 0 or row >= len(self.inventory_raw_records):
+            return
+        raw = self.inventory_raw_records[row]
+
+        size = str(raw.get("size", "None")).upper()
+        if size == "XL":
+            self.inline_stock_size.setCurrentIndex(1)
+        elif size == "L":
+            self.inline_stock_size.setCurrentIndex(0)
+        else:
+            self.inline_stock_size.setCurrentIndex(2)
+
+        self.inline_stock_qty.setText(str(raw.get("quantity", 0)))
+
+        idx = self.inline_stock_unit.findText(str(raw.get("unit", "pcs")))
+        self.inline_stock_unit.setCurrentIndex(idx if idx >= 0 else 0)
 
     # ── Modal launchers ───────────────────────────────────────────────────────
     def open_record_sales_modal(self):
